@@ -1,743 +1,215 @@
-// import React, { useState, useEffect, useRef } from 'react';
-// import { View, Text, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
-// import MapView, { Marker, Callout, UrlTile } from 'react-native-maps';
-// import * as Location from 'expo-location';
-// import { Colors, shared } from './Theme';
-
-// const dummyJobs = [
-//   { id: '1', title: 'Cashier at Walmart', type: 'Part-time', salary: 15, salaryType: 'hourly', lat: 39.7651, lng: -84.0660, kind: 'job' },
-//   { id: '2', title: 'Software Intern', type: 'Full-time', salary: 700, salaryType: 'weekly', lat: 39.7589, lng: -84.1916, kind: 'job' },
-//   { id: '3', title: 'Apartment Room', rent: 500, lat: 39.8209, lng: -84.0194, kind: 'accommodation' },
-// ];
-
-// export default function MapScreen({ jobs: propJobs = [], onOpenJob = () => {} }) {
-//   const [kindFilter, setKindFilter] = useState('all');
-//   const [permission, setPermission] = useState('unknown');
-//   const [location, setLocation] = useState(null);
-//   const [loading, setLoading] = useState(false);
-//   const mapRef = useRef(null);
-
-//   const jobs = (propJobs && propJobs.length) ? propJobs : dummyJobs;
-
-//   const filtered = jobs.filter(j => {
-//     if (!j) return false;
-//     if (kindFilter === 'job' && j.kind !== 'job') return false;
-//     if (kindFilter === 'accommodation' && j.kind !== 'accommodation') return false;
-//     return true;
-//   });
-
-//   useEffect(() => {
-//     (async () => {
-//       setLoading(true);
-//       try {
-//         const res = await Location.requestForegroundPermissionsAsync();
-//         if (res.status === 'granted') {
-//           setPermission('granted');
-//           const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-//           setLocation({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
-//         } else {
-//           setPermission('denied');
-//         }
-//       } catch (e) {
-//         setPermission('unknown');
-//       }
-//       setLoading(false);
-//     })();
-//   }, []);
-
-//   const askPermission = async () => {
-//     setLoading(true);
-//     try {
-//       const res = await Location.requestForegroundPermissionsAsync();
-//       if (res.status === 'granted') {
-//         setPermission('granted');
-//         const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-//         setLocation({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
-//         if (mapRef.current) mapRef.current.animateToRegion({ latitude: pos.coords.latitude, longitude: pos.coords.longitude, latitudeDelta: 0.05, longitudeDelta: 0.05 });
-//       } else {
-//         setPermission('denied');
-//         Alert.alert('Permission required', 'Location permission is required to show nearby jobs.');
-//       }
-//     } catch (e) {
-//       Alert.alert('Missing package', 'Run `npx expo install expo-location`.');
-//     }
-//     setLoading(false);
-//   };
-
-//   if (loading) return (
-//     <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-//       <ActivityIndicator size="large" color={Colors.primary} />
-//     </View>
-//   );
-
-//   return (
-//     <View style={{ flex: 1 }}>
-//       <View style={{ flexDirection: 'row', padding: 8, justifyContent: 'center', backgroundColor: Colors.bg }}>
-//         <TouchableOpacity onPress={() => setKindFilter('all')} style={[shared.smallButton, { backgroundColor: kindFilter === 'all' ? Colors.primary : Colors.card, marginHorizontal: 6 }]}>
-//           <Text style={{ color: kindFilter === 'all' ? Colors.card : undefined }}>All</Text>
-//         </TouchableOpacity>
-//         <TouchableOpacity onPress={() => setKindFilter('job')} style={[shared.smallButton, { backgroundColor: kindFilter === 'job' ? Colors.primary : Colors.card, marginHorizontal: 6 }]}>
-//           <Text style={{ color: kindFilter === 'job' ? Colors.card : undefined }}>Jobs nearby</Text>
-//         </TouchableOpacity>
-//         <TouchableOpacity onPress={() => setKindFilter('accommodation')} style={[shared.smallButton, { backgroundColor: kindFilter === 'accommodation' ? Colors.primary : Colors.card, marginHorizontal: 6 }]}>
-//           <Text style={{ color: kindFilter === 'accommodation' ? Colors.card : undefined }}>Accom nearby</Text>
-//         </TouchableOpacity>
-//       </View>
-
-//       <View style={{ flex: 1 }}>
-//         {permission === 'granted' ? (
-//           location ? (
-//             <View style={{ flex: 1 }}>
-//               <MapView ref={mapRef} style={{ flex: 1 }} initialRegion={{ latitude: location.latitude, longitude: location.longitude, latitudeDelta: 0.05, longitudeDelta: 0.05 }}>
-//                 <UrlTile urlTemplate="https://c.tile.openstreetmap.org/{z}/{x}/{y}.png" maximumZ={19} />
-//                 {filtered.map(j => j.lat && j.lng ? (
-//                   <Marker key={j.id} coordinate={{ latitude: j.lat, longitude: j.lng }} title={j.title} description={j.kind === 'accommodation' ? `Rent: ${j.currency ? j.currency + ' ' : ''}${j.rent}` : `${j.type || ''} • ${j.currency ? j.currency + ' ' : ''}${j.salary}` }>
-//                     <Callout onPress={() => onOpenJob(j, { showContact: true })}>
-//                       <View style={{ width: 200 }}>
-//                         <Text style={{ fontWeight: '700' }}>{j.title}</Text>
-//                         <Text style={{ color: Colors.muted, marginTop: 4 }}>{j.kind === 'accommodation' ? `Rent: ${j.currency ? j.currency + ' ' : ''}${j.rent}` : `${j.type || ''} • ${j.currency ? j.currency + ' ' : ''}${j.salary}`}</Text>
-//                         <TouchableOpacity onPress={() => onOpenJob(j, { showContact: true })} style={[shared.primaryButton, { marginTop: 8 }]}>
-//                           <Text style={shared.primaryButtonText}>View</Text>
-//                         </TouchableOpacity>
-//                       </View>
-//                     </Callout>
-//                   </Marker>
-//                 ) : null)}
-//               </MapView>
-
-//               <TouchableOpacity onPress={() => { if (mapRef.current && location) mapRef.current.animateToRegion({ latitude: location.latitude, longitude: location.longitude, latitudeDelta: 0.05, longitudeDelta: 0.05 }); }} style={[shared.primaryButton, { margin: 12, alignSelf: 'flex-end' }]}>
-//                 <Text style={shared.primaryButtonText}>Center on me</Text>
-//               </TouchableOpacity>
-//             </View>
-//           ) : (
-//             <View style={{ padding: 16 }}>
-//               <Text>Unable to obtain your location. Try again.</Text>
-//               <TouchableOpacity onPress={askPermission} style={[shared.primaryButton, { marginTop: 12 }]}>
-//                 <Text style={shared.primaryButtonText}>Allow location</Text>
-//               </TouchableOpacity>
-//             </View>
-//           )
-//         ) : (
-//           <View style={{ padding: 16 }}>
-//             <Text style={{ marginBottom: 8 }}>We use your location only to show nearby jobs. We do not use it for any other purpose.</Text>
-//             <Text style={{ marginBottom: 8 }}>Permission: {permission}</Text>
-//             <TouchableOpacity onPress={askPermission} style={[shared.primaryButton, { marginTop: 8 }]}>
-//               <Text style={shared.primaryButtonText}>Allow location</Text>
-//             </TouchableOpacity>
-//           </View>
-//         )}
-//       </View>
-//     </View>
-//   );
-// }
-// // // // import React, { useState, useEffect, useRef } from 'react';
-// // // // import { View, Text, TouchableOpacity, FlatList, ActivityIndicator, Alert, Platform } from 'react-native';
-// // // // import MapView, { Marker, Callout, UrlTile } from 'react-native-maps';
-// // // // import * as Location from 'expo-location';
-// // // // import { Colors, shared } from './Theme';
-
-// // // // export default function MapScreen({ jobs, onOpenJob }) {
-// // // //   const [part, setPart] = useState(false);
-// // // //   const [salaryType, setSalaryType] = useState(null);
-// // // //   const [experience, setExperience] = useState(null);
-
-// // // //   const [permission, setPermission] = useState('unknown'); // 'unknown', 'granted', 'denied'
-// // // //   const [location, setLocation] = useState(null);
-// // // //   const [loading, setLoading] = useState(false);
-// // // //   const mapRef = useRef(null);
-
-// // // //   const filtered = jobs.filter(j => {
-// // // //     if (part && !j.type.toLowerCase().includes('part')) return false;
-// // // //     if (salaryType && j.salaryType !== salaryType) return false;
-// // // //     if (experience !== null && !!j.experienceRequired !== experience) return false;
-// // // //     return true;
-// // // //   });
-
-// // // //   useEffect(() => {
-// // // //     (async () => {
-// // // //       setLoading(true);
-// // // //       try {
-// // // //         const res = await Location.requestForegroundPermissionsAsync();
-// // // //         if (res.status === 'granted') {
-// // // //           setPermission('granted');
-// // // //           const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-// // // //           setLocation({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
-// // // //         } else {
-// // // //           setPermission('denied');
-// // // //         }
-// // // //       } catch (e) {
-// // // //         setPermission('unknown');
-// // // //       }
-// // // //       setLoading(false);
-// // // //     })();
-// import React, { useState, useEffect, useRef } from 'react';
-// import { View, Text, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
-// import MapView, { Marker, Callout, UrlTile } from 'react-native-maps';
-// import * as Location from 'expo-location';
-// import { Colors, shared } from './Theme';
-
-// // Minimal sample posts when none are provided
-// const dummyJobs = [
-//   { id: '1', title: 'Cashier at Walmart', type: 'Part-time', salary: 15, salaryType: 'hourly', lat: 39.7651, lng: -84.0660, kind: 'job' },
-//   { id: '2', title: 'Software Intern', type: 'Full-time', salary: 700, salaryType: 'weekly', lat: 39.7589, lng: -84.1916, kind: 'job' },
-//   { id: '3', title: 'Apartment Room', rent: 500, lat: 39.8209, lng: -84.0194, kind: 'accommodation' },
-// ];
-
-// export default function MapScreen({ jobs: propJobs = [], onOpenJob = () => {} }) {
-//   const [kindFilter, setKindFilter] = useState('all');
-//   const [permission, setPermission] = useState('unknown');
-//   const [location, setLocation] = useState(null);
-//   const [loading, setLoading] = useState(false);
-//   const mapRef = useRef(null);
-
-//   const jobs = (propJobs && propJobs.length) ? propJobs : dummyJobs;
-
-//   const filtered = jobs.filter(j => {
-//     if (!j) return false;
-//     if (kindFilter === 'job' && j.kind !== 'job') return false;
-//     if (kindFilter === 'accommodation' && j.kind !== 'accommodation') return false;
-//     return true;
-//   });
-
-//   useEffect(() => {
-//     (async () => {
-//       setLoading(true);
-//       try {
-//         const res = await Location.requestForegroundPermissionsAsync();
-//         if (res.status === 'granted') {
-//           setPermission('granted');
-//           const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-//           setLocation({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
-//         } else {
-//           setPermission('denied');
-//         }
-//       } catch (e) {
-//         setPermission('unknown');
-//       }
-//       setLoading(false);
-//     })();
-//   }, []);
-
-//   const askPermission = async () => {
-//     setLoading(true);
-//     try {
-//       const res = await Location.requestForegroundPermissionsAsync();
-//       if (res.status === 'granted') {
-//         setPermission('granted');
-//         const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-//         setLocation({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
-//         if (mapRef.current) {
-//           mapRef.current.animateToRegion({ latitude: pos.coords.latitude, longitude: pos.coords.longitude, latitudeDelta: 0.05, longitudeDelta: 0.05 });
-//         }
-//       } else {
-//         setPermission('denied');
-//         Alert.alert('Permission required', 'Location permission is required to show nearby jobs.');
-//       }
-//     } catch (e) {
-//       Alert.alert('Missing package', 'Run `npx expo install expo-location`.');
-//     }
-//     setLoading(false);
-//   };
-
-//   if (loading) return (
-//     <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-//       <ActivityIndicator size="large" color={Colors.primary} />
-//     </View>
-//   );
-
-//   return (
-//     <View style={{ flex: 1 }}>
-//       {/* Filter bar */}
-//       <View style={{ flexDirection: 'row', padding: 8, justifyContent: 'center', backgroundColor: Colors.bg }}>
-//         <TouchableOpacity onPress={() => setKindFilter('all')} style={[shared.smallButton, { backgroundColor: kindFilter === 'all' ? Colors.primary : Colors.card, marginHorizontal: 6 }]}>
-//           <Text style={{ color: kindFilter === 'all' ? Colors.card : undefined }}>All</Text>
-//         </TouchableOpacity>
-//         <TouchableOpacity onPress={() => setKindFilter('job')} style={[shared.smallButton, { backgroundColor: kindFilter === 'job' ? Colors.primary : Colors.card, marginHorizontal: 6 }]}>
-//           <Text style={{ color: kindFilter === 'job' ? Colors.card : undefined }}>Jobs nearby</Text>
-//         </TouchableOpacity>
-//         <TouchableOpacity onPress={() => setKindFilter('accommodation')} style={[shared.smallButton, { backgroundColor: kindFilter === 'accommodation' ? Colors.primary : Colors.card, marginHorizontal: 6 }]}>
-//           <Text style={{ color: kindFilter === 'accommodation' ? Colors.card : undefined }}>Accom nearby</Text>
-//         </TouchableOpacity>
-//       </View>
-
-//       {/* Map section */}
-//       <View style={{ flex: 1 }}>
-//         {permission === 'granted' ? (
-//           location ? (
-//             <View style={{ flex: 1 }}>
-//               <MapView ref={mapRef} style={{ flex: 1 }} initialRegion={{ latitude: location.latitude, longitude: location.longitude, latitudeDelta: 0.05, longitudeDelta: 0.05 }}>
-//                 <UrlTile urlTemplate="https://c.tile.openstreetmap.org/{z}/{x}/{y}.png" maximumZ={19} />
-//                 {filtered.map(j => j.lat && j.lng ? (
-//                   <Marker key={j.id} coordinate={{ latitude: j.lat, longitude: j.lng }} title={j.title} description={j.kind === 'accommodation' ? `Rent: ${j.currency ? j.currency + ' ' : ''}${j.rent}` : `${j.type || ''} • ${j.currency ? j.currency + ' ' : ''}${j.salary}` }>
-//                     <Callout onPress={() => onOpenJob(j, { showContact: true })}>
-//                       <View style={{ width: 200 }}>
-//                         <Text style={{ fontWeight: '700' }}>{j.title}</Text>
-//                         <Text style={{ color: Colors.muted, marginTop: 4 }}>{j.kind === 'accommodation' ? `Rent: ${j.currency ? j.currency + ' ' : ''}${j.rent}` : `${j.type || ''} • ${j.currency ? j.currency + ' ' : ''}${j.salary}`}</Text>
-//                         <TouchableOpacity onPress={() => onOpenJob(j, { showContact: true })} style={[shared.primaryButton, { marginTop: 8 }]}>
-//                           <Text style={shared.primaryButtonText}>View</Text>
-//                         </TouchableOpacity>
-//                       </View>
-//                     </Callout>
-//                   </Marker>
-//                 ) : null)}
-//               </MapView>
-
-//               <TouchableOpacity onPress={() => { if (mapRef.current && location) mapRef.current.animateToRegion({ latitude: location.latitude, longitude: location.longitude, latitudeDelta: 0.05, longitudeDelta: 0.05 }); }} style={[shared.primaryButton, { margin: 12, alignSelf: 'flex-end' }]}>
-//                 <Text style={shared.primaryButtonText}>Center on me</Text>
-//               </TouchableOpacity>
-//             </View>
-//           ) : (
-//             <View style={{ padding: 16 }}>
-//               <Text>Unable to obtain your location. Try again.</Text>
-//               <TouchableOpacity onPress={askPermission} style={[shared.primaryButton, { marginTop: 12 }]}>
-//                 <Text style={shared.primaryButtonText}>Allow location</Text>
-//               </TouchableOpacity>
-//             </View>
-//           )
-//         ) : (
-//           <View style={{ padding: 16 }}>
-//             <Text style={{ marginBottom: 8 }}>We use your location only to show nearby jobs. We do not use it for any other purpose.</Text>
-//             <Text style={{ marginBottom: 8 }}>Permission: {permission}</Text>
-//             <TouchableOpacity onPress={askPermission} style={[shared.primaryButton, { marginTop: 8 }]}>
-//               <Text style={shared.primaryButtonText}>Allow location</Text>
-//             </TouchableOpacity>
-//           </View>
-//         )}
-//       </View>
-//     </View>
-//   );
-// }
-//                         <Text style={{ color: Colors.muted, marginTop: 4 }}>{j.kind === 'accommodation' ? `Rent: ${j.currency ? j.currency + ' ' : ''}${j.rent}` : `${j.type || ''} • ${j.currency ? j.currency + ' ' : ''}${j.salary}`}</Text>
-//                         <TouchableOpacity onPress={() => onOpenJob(j, { showContact: true })} style={[shared.primaryButton, { marginTop: 8 }]}>
-//                           <Text style={shared.primaryButtonText}>View</Text>
-//                         </TouchableOpacity>
-//                       </View>
-//                     </Callout>
-//                   </Marker>
-//                 ) : null)}
-//               </MapView>
-
-//               <TouchableOpacity onPress={() => { if (mapRef.current && location) mapRef.current.animateToRegion({ latitude: location.latitude, longitude: location.longitude, latitudeDelta: 0.05, longitudeDelta: 0.05 }); }} style={[shared.primaryButton, { margin: 12, alignSelf: 'flex-end' }]}>
-//                 <Text style={shared.primaryButtonText}>Center on me</Text>
-//               </TouchableOpacity>
-//             </View>
-//           ) : (
-//             <View style={{ padding: 16 }}>
-//               <Text>Unable to obtain your location. Try again.</Text>
-//               <TouchableOpacity onPress={askPermission} style={[shared.primaryButton, { marginTop: 12 }]}>
-//                 <Text style={shared.primaryButtonText}>Allow location</Text>
-//               </TouchableOpacity>
-//             </View>
-//           )
-//         ) : (
-//           <View style={{ padding: 16 }}>
-//             <Text style={{ marginBottom: 8 }}>We use your location only to show nearby jobs. We do not use it for any other purpose.</Text>
-//             <Text style={{ marginBottom: 8 }}>Permission: {permission}</Text>
-//             <TouchableOpacity onPress={askPermission} style={[shared.primaryButton, { marginTop: 8 }]}>
-//               <Text style={shared.primaryButtonText}>Allow location</Text>
-//             </TouchableOpacity>
-//           </View>
-//         )}
-//       </View>
-//     </View>
-//   );
-// }
-
-// legacy commented fragments removed
-
-
-// // import React, { useState, useEffect, useRef } from 'react';
-// // import { View, Text, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
-// // import MapView, { Marker, Callout } from 'react-native-maps';
-// // import * as Location from 'expo-location';
-// // import { Colors, shared } from './Theme';
-
-// // // Minimal sample posts when none are provided
-// // const dummyJobs = [
-// //   { id: '1', title: 'Cashier at Walmart', type: 'Part-time', salary: 15, salaryType: 'hourly', lat: 39.7651, lng: -84.0660, kind: 'job' },
-// //   { id: '2', title: 'Software Intern', type: 'Full-time', salary: 700, salaryType: 'weekly', lat: 39.7589, lng: -84.1916, kind: 'job' },
-// //   { id: '3', title: 'Apartment Room', rent: 500, lat: 39.8209, lng: -84.0194, kind: 'accommodation' },
-// // ];
-
-// // export default function MapScreen({ jobs: propJobs = [], onOpenJob = () => {} }) {
-// //   const [kindFilter, setKindFilter] = useState('all');
-// //   const [permission, setPermission] = useState('unknown');
-// //   const [location, setLocation] = useState(null);
-// //   const [loading, setLoading] = useState(false);
-// //   const mapRef = useRef(null);
-
-// //   const jobs = (propJobs && propJobs.length) ? propJobs : dummyJobs;
-
-// //   const filtered = jobs.filter(j => {
-// //     if (!j) return false;
-// //     if (kindFilter === 'job' && j.kind !== 'job') return false;
-// //     if (kindFilter === 'accommodation' && j.kind !== 'accommodation') return false;
-// //     return true;
-// //   });
-
-// //   useEffect(() => {
-// //     (async () => {
-// //       setLoading(true);
-// //       try {
-// //         const res = await Location.requestForegroundPermissionsAsync();
-// //         if (res.status === 'granted') {
-// //           setPermission('granted');
-// //           const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-// //           setLocation({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
-// //         } else {
-// //           setPermission('denied');
-// //         }
-// //       } catch (e) {
-// //         setPermission('unknown');
-// //       }
-// //       setLoading(false);
-// //     })();
-// //   }, []);
-
-// //   const askPermission = async () => {
-// //     setLoading(true);
-// //     try {
-// //       const res = await Location.requestForegroundPermissionsAsync();
-// //       if (res.status === 'granted') {
-// //         setPermission('granted');
-// //         const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-// //         setLocation({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
-// //         if (mapRef.current) {
-// //           mapRef.current.animateToRegion({ latitude: pos.coords.latitude, longitude: pos.coords.longitude, latitudeDelta: 0.05, longitudeDelta: 0.05 });
-// //         }
-// //       } else {
-// //         setPermission('denied');
-// //         Alert.alert('Permission required', 'Location permission is required to show nearby jobs.');
-// //       }
-// //     } catch (e) {
-// //       Alert.alert('Missing package', 'Run `npx expo install expo-location`.');
-// //     }
-// //     setLoading(false);
-// //   };
-
-// //   if (loading) return (
-// //     <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-// //       <ActivityIndicator size="large" color={Colors.primary} />
-// //     </View>
-// //   );
-
-// //   return (
-// //     <View style={{ flex: 1 }}>
-// //       {/* Filter bar */}
-// //       <View style={{ flexDirection: 'row', padding: 8, justifyContent: 'center', backgroundColor: Colors.bg }}>
-// //         <TouchableOpacity onPress={() => setKindFilter('all')} style={[shared.smallButton, { backgroundColor: kindFilter === 'all' ? Colors.primary : Colors.card, marginHorizontal: 6 }]}>
-// //           <Text style={{ color: kindFilter === 'all' ? Colors.card : undefined }}>All</Text>
-// //         </TouchableOpacity>
-// //         <TouchableOpacity onPress={() => setKindFilter('job')} style={[shared.smallButton, { backgroundColor: kindFilter === 'job' ? Colors.primary : Colors.card, marginHorizontal: 6 }]}>
-// //           <Text style={{ color: kindFilter === 'job' ? Colors.card : undefined }}>Jobs nearby</Text>
-// //         </TouchableOpacity>
-// //         <TouchableOpacity onPress={() => setKindFilter('accommodation')} style={[shared.smallButton, { backgroundColor: kindFilter === 'accommodation' ? Colors.primary : Colors.card, marginHorizontal: 6 }]}>
-// //           <Text style={{ color: kindFilter === 'accommodation' ? Colors.card : undefined }}>Accom nearby</Text>
-// //         </TouchableOpacity>
-// //       </View>
-
-// //       {/* Map section */}
-// //       <View style={{ flex: 1 }}>
-// //         {permission === 'granted' ? (
-// //           location ? (
-// //             <View style={{ flex: 1 }}>
-// //               <MapView ref={mapRef} style={{ flex: 1 }} initialRegion={{ latitude: location.latitude, longitude: location.longitude, latitudeDelta: 0.05, longitudeDelta: 0.05 }}>
-// //                 {filtered.map(j => j.lat && j.lng ? (
-// //                   <Marker key={j.id} coordinate={{ latitude: j.lat, longitude: j.lng }} title={j.title} description={j.kind === 'accommodation' ? `Rent: ${j.currency ? j.currency + ' ' : ''}${j.rent}` : `${j.type || ''} • ${j.currency ? j.currency + ' ' : ''}${j.salary}` }>
-// //                     <Callout onPress={() => onOpenJob(j, { showContact: true })}>
-// //                       <View style={{ width: 200 }}>
-// //                         <Text style={{ fontWeight: '700' }}>{j.title}</Text>
-// //                         <Text style={{ color: Colors.muted, marginTop: 4 }}>{j.kind === 'accommodation' ? `Rent: ${j.currency ? j.currency + ' ' : ''}${j.rent}` : `${j.type || ''} • ${j.currency ? j.currency + ' ' : ''}${j.salary}`}</Text>
-// //                         <TouchableOpacity onPress={() => onOpenJob(j, { showContact: true })} style={[shared.primaryButton, { marginTop: 8 }]}>
-// //                           <Text style={shared.primaryButtonText}>View</Text>
-// //                         </TouchableOpacity>
-// //                       </View>
-// //                     </Callout>
-// //                   </Marker>
-// //                 ) : null)}
-// //               </MapView>
-
-// //               <TouchableOpacity onPress={() => { if (mapRef.current && location) mapRef.current.animateToRegion({ latitude: location.latitude, longitude: location.longitude, latitudeDelta: 0.05, longitudeDelta: 0.05 }); }} style={[shared.primaryButton, { margin: 12, alignSelf: 'flex-end' }]}>
-// //                 <Text style={shared.primaryButtonText}>Center on me</Text>
-// //               </TouchableOpacity>
-// //             </View>
-// //           ) : (
-// //             <View style={{ padding: 16 }}>
-// //               <Text>Unable to obtain your location. Try again.</Text>
-// //               <TouchableOpacity onPress={askPermission} style={[shared.primaryButton, { marginTop: 12 }]}>
-// //                 <Text style={shared.primaryButtonText}>Allow location</Text>
-// //               </TouchableOpacity>
-// //             </View>
-// //           )
-// //         ) : (
-// //           <View style={{ padding: 16 }}>
-// //             <Text style={{ marginBottom: 8 }}>We use your location only to show nearby jobs. We do not use it for any other purpose.</Text>
-// //             <Text style={{ marginBottom: 8 }}>Permission: {permission}</Text>
-// //             <TouchableOpacity onPress={askPermission} style={[shared.primaryButton, { marginTop: 8 }]}>
-// //               <Text style={shared.primaryButtonText}>Allow location</Text>
-// //             </TouchableOpacity>
-// //           </View>
-// //         )}
-// //       </View>
-// //     </View>
-// //   );
-// // }
-
-
 
 
 
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
-import MapView, { Marker, Callout } from 'react-native-maps';
+import { View, Text, TextInput, TouchableOpacity, FlatList, Image, StyleSheet, Platform, ActivityIndicator, Alert } from 'react-native';
+import MapView, { Marker } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { Colors, shared } from './Theme';
 
-// Minimal sample posts when none are provided
-const dummyJobs = [
-  { id: '1', title: 'Cashier at Walmart', type: 'Part-time', salary: 15, salaryType: 'hourly', lat: 39.7651, lng: -84.0660, kind: 'job' },
-  { id: '2', title: 'Software Intern', type: 'Full-time', salary: 700, salaryType: 'weekly', lat: 39.7589, lng: -84.1916, kind: 'job' },
-  { id: '3', title: 'Apartment Room', rent: 500, lat: 39.8209, lng: -84.0194, kind: 'accommodation' },
-];
-
-export default function MapScreen({ jobs: propJobs = [], onOpenJob = () => {} }) {
-  const [kindFilter, setKindFilter] = useState('all');
-  const [permission, setPermission] = useState('unknown');
-  const [location, setLocation] = useState(null);
-  const [loading, setLoading] = useState(false);
+export default function MapScreen({ jobs = [], accommodations = [], userLocation = null, onOpenJob = () => {} }) {
   const mapRef = useRef(null);
+  const [mode, setMode] = useState('all'); // 'all' | 'jobs' | 'accommodations'
+  const [query, setQuery] = useState('');
+  const [accomFilter, setAccomFilter] = useState('all'); // 'all' | 'owned' | 'shared'
+  const [selectedJobForPros, setSelectedJobForPros] = useState(null);
+  const [results, setResults] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [loading, setLoading] = useState(false);
 
-  const jobs = (propJobs && propJobs.length) ? propJobs : dummyJobs;
-
-  const filtered = jobs.filter(j => {
-    if (!j) return false;
-    if (kindFilter === 'job' && j.kind !== 'job') return false;
-    if (kindFilter === 'accommodation' && j.kind !== 'accommodation') return false;
-    return true;
-  });
 
   useEffect(() => {
-    (async () => {
-      setLoading(true);
-      try {
-        const res = await Location.requestForegroundPermissionsAsync();
-        if (res.status === 'granted') {
-          setPermission('granted');
-          const pos = await Location.getCurrentPositionAsync({
-            accuracy: Location.Accuracy.Balanced,
-          });
-          setLocation({
-            latitude: pos.coords.latitude,
-            longitude: pos.coords.longitude,
-          });
-        } else {
-          setPermission('denied');
-        }
-      } catch (e) {
-        setPermission('unknown');
-      }
-      setLoading(false);
-    })();
-  }, []);
+    runSearch();
+  }, [mode, query, jobs, accommodations, userLocation, accomFilter]);
 
-  const askPermission = async () => {
-    setLoading(true);
-    try {
-      const res = await Location.requestForegroundPermissionsAsync();
-      if (res.status === 'granted') {
-        setPermission('granted');
-        const pos = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
-        setLocation({
-          latitude: pos.coords.latitude,
-          longitude: pos.coords.longitude,
-        });
-        if (mapRef.current) {
-          mapRef.current.animateToRegion({
-            latitude: pos.coords.latitude,
-            longitude: pos.coords.longitude,
-            latitudeDelta: 0.05,
-            longitudeDelta: 0.05,
-          });
-        }
-      } else {
-        setPermission('denied');
-        Alert.alert('Permission required', 'Location permission is required to show nearby jobs.');
-      }
-    } catch (e) {
-      Alert.alert('Missing package', 'Run `npx expo install expo-location`.');
+  function runSearch() {
+    const q = (query || '').trim().toLowerCase();
+    let items = [];
+
+    if (mode === 'jobs' || mode === 'all') {
+      const found = (jobs || []).filter(j => {
+        if (!q) return true;
+        return (j.title || '').toLowerCase().includes(q) || (j.tags || []).join(' ').toLowerCase().includes(q) || (j.location || '').toLowerCase().includes(q);
+      }).map(j => ({ ...j, _type: 'job' }));
+      items = items.concat(found);
     }
-    setLoading(false);
-  };
 
-  if (loading) {
-    return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-        <ActivityIndicator size="large" color={Colors.primary} />
-      </View>
-    );
+    if (mode === 'accommodations' || mode === 'all') {
+      let found = (accommodations || []).filter(a => {
+        if (!q) return true;
+        return (a.title || a.accomType || '').toLowerCase().includes(q) || (a.tags || []).join(' ').toLowerCase().includes(q) || (a.location || '').toLowerCase().includes(q);
+      }).map(a => ({ ...a, _type: 'accommodation' }));
+
+      if (mode === 'accommodations' && accomFilter === 'owned') {
+        found = found.filter(a => !!a.owner);
+      } else if (mode === 'accommodations' && accomFilter === 'shared') {
+        found = found.filter(a => a.shared === true);
+      }
+
+      items = items.concat(found);
+    }
+
+    // professionals removed — only jobs and accommodations are searched
+
+    const withDist = items.map(it => {
+      if (userLocation && it.lat != null && it.lng != null) {
+        const dist = haversine(userLocation.latitude, userLocation.longitude, it.lat, it.lng);
+        return { ...it, _distance: dist };
+      }
+      return it;
+    });
+
+    const sorted = (userLocation) ? withDist.sort((a,b) => (a._distance || 1e9) - (b._distance || 1e9)) : withDist;
+    setResults(sorted);
+    if (sorted.length) setSelected(sorted[0]);
   }
+
+  function haversine(lat1, lon1, lat2, lon2) {
+    const toRad = v => v * Math.PI / 180;
+    const R = 6371;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a = Math.sin(dLat/2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon/2) ** 2;
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R * c;
+  }
+
+  function centerOn(item) {
+    if (!item || !mapRef.current) return;
+    const lat = item.lat || item.latitude || (item.locationLat) || (item.coords && item.coords.latitude);
+    const lng = item.lng || item.longitude || (item.locationLng) || (item.coords && item.coords.longitude);
+    if (lat == null || lng == null) return;
+    mapRef.current.animateToRegion({
+      latitude: lat,
+      longitude: lng,
+      latitudeDelta: 0.05,
+      longitudeDelta: 0.05,
+    }, 400);
+    setSelected(item);
+  }
+
+  if (loading) return (
+    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+      <ActivityIndicator size="large" color={Colors.primary} />
+    </View>
+  );
 
   return (
     <View style={{ flex: 1 }}>
-      {/* Filter bar */}
-      <View
-        style={{
-          flexDirection: 'row',
-          padding: 8,
-          justifyContent: 'center',
-          backgroundColor: Colors.bg,
-        }}
-      >
-        <TouchableOpacity
-          onPress={() => setKindFilter('all')}
-          style={[
-            shared.smallButton,
-            {
-              backgroundColor:
-                kindFilter === 'all' ? Colors.primary : Colors.card,
-              marginHorizontal: 6,
-            },
-          ]}
-        >
-          <Text style={{ color: kindFilter === 'all' ? Colors.card : undefined }}>
-            All
-          </Text>
-        </TouchableOpacity>
+      <View style={styles.searchBar}>
+        <View style={styles.segment}>
+          <TouchableOpacity style={[styles.segBtn, mode === 'all' && styles.segActive]} onPress={() => { setMode('all'); setQuery(''); }}><Text style={styles.segTxt}>All</Text></TouchableOpacity>
+          <TouchableOpacity style={[styles.segBtn, mode === 'jobs' && styles.segActive]} onPress={() => setMode('jobs')}><Text style={styles.segTxt}>Jobs</Text></TouchableOpacity>
+          <TouchableOpacity style={[styles.segBtn, mode === 'accommodations' && styles.segActive]} onPress={() => setMode('accommodations')}><Text style={styles.segTxt}>Accom</Text></TouchableOpacity>
+    {/* Professionals removed */}
+        </View>
 
-        <TouchableOpacity
-          onPress={() => setKindFilter('job')}
-          style={[
-            shared.smallButton,
-            {
-              backgroundColor:
-                kindFilter === 'job' ? Colors.primary : Colors.card,
-              marginHorizontal: 6,
-            },
-          ]}
-        >
-          <Text style={{ color: kindFilter === 'job' ? Colors.card : undefined }}>
-            Jobs nearby
-          </Text>
-        </TouchableOpacity>
+        {/* no professional categories */}
 
-        <TouchableOpacity
-          onPress={() => setKindFilter('accommodation')}
-          style={[
-            shared.smallButton,
-            {
-              backgroundColor:
-                kindFilter === 'accommodation' ? Colors.primary : Colors.card,
-              marginHorizontal: 6,
-            },
-          ]}
-        >
-          <Text
-            style={{
-              color: kindFilter === 'accommodation' ? Colors.card : undefined,
-            }}
-          >
-            Accom nearby
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Map section */}
-      <View style={{ flex: 1 }}>
-        {permission === 'granted' ? (
-          location ? (
-            <View style={{ flex: 1 }}>
-              <MapView
-                ref={mapRef}
-                style={{ flex: 1 }}
-                initialRegion={{
-                  latitude: location.latitude,
-                  longitude: location.longitude,
-                  latitudeDelta: 0.05,
-                  longitudeDelta: 0.05,
-                }}
-              >
-                {filtered.map(j =>
-                  j.lat && j.lng ? (
-                    <Marker
-                      key={j.id}
-                      coordinate={{ latitude: j.lat, longitude: j.lng }}
-                      title={j.title}
-                      description={
-                        j.kind === 'accommodation'
-                          ? `Rent: ${j.currency ? j.currency + ' ' : ''}${j.rent ?? ''}`
-                          : `${j.type || ''} • ${
-                              j.currency ? j.currency + ' ' : ''
-                            }${j.salary ?? ''}`
-                      }
-                    >
-                      <Callout onPress={() => onOpenJob(j, { showContact: true })}>
-                        <View style={{ width: 200 }}>
-                          <Text style={{ fontWeight: '700' }}>{j.title}</Text>
-                          <Text style={{ color: Colors.muted, marginTop: 4 }}>
-                            {j.kind === 'accommodation'
-                              ? `Rent: ${j.currency ? j.currency + ' ' : ''}${j.rent ?? ''}`
-                              : `${j.type || ''} • ${
-                                  j.currency ? j.currency + ' ' : ''
-                                }${j.salary ?? ''}`}
-                          </Text>
-                          <TouchableOpacity
-                            onPress={() => onOpenJob(j, { showContact: true })}
-                            style={[shared.primaryButton, { marginTop: 8 }]}
-                          >
-                            <Text style={shared.primaryButtonText}>View</Text>
-                          </TouchableOpacity>
-                        </View>
-                      </Callout>
-                    </Marker>
-                  ) : null
-                )}
-              </MapView>
-
-              <TouchableOpacity
-                onPress={() => {
-                  if (mapRef.current && location) {
-                    mapRef.current.animateToRegion({
-                      latitude: location.latitude,
-                      longitude: location.longitude,
-                      latitudeDelta: 0.05,
-                      longitudeDelta: 0.05,
-                    });
-                  }
-                }}
-                style={[shared.primaryButton, { margin: 12, alignSelf: 'flex-end' }]}
-              >
-                <Text style={shared.primaryButtonText}>Center on me</Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <View style={{ padding: 16 }}>
-              <Text>Unable to obtain your location. Try again.</Text>
-              <TouchableOpacity
-                onPress={askPermission}
-                style={[shared.primaryButton, { marginTop: 12 }]}
-              >
-                <Text style={shared.primaryButtonText}>Allow location</Text>
-              </TouchableOpacity>
-            </View>
-          )
-        ) : (
-          <View style={{ padding: 16 }}>
-            <Text style={{ marginBottom: 8 }}>
-              We use your location only to show nearby jobs. We do not use it for
-              any other purpose.
-            </Text>
-            <Text style={{ marginBottom: 8 }}>Permission: {permission}</Text>
-            <TouchableOpacity
-              onPress={askPermission}
-              style={[shared.primaryButton, { marginTop: 8 }]}
-            >
-              <Text style={shared.primaryButtonText}>Allow location</Text>
-            </TouchableOpacity>
+        {mode === 'accommodations' && (
+          <View style={styles.categoryRow}>
+            <FlatList
+              horizontal
+              data={[{k:'all', t:'All'}, {k:'owned', t:'Owned'}, {k:'shared', t:'Shared'}]}
+              keyExtractor={c => c.k}
+              renderItem={({ item }) => (
+                <TouchableOpacity onPress={() => setAccomFilter(item.k)} style={[styles.catChip, item.k === accomFilter && styles.catActive]}>
+                  <Text style={{ color: item.k === accomFilter ? '#fff' : '#333' }}>{item.t}</Text>
+                </TouchableOpacity>
+              )}
+              showsHorizontalScrollIndicator={false}
+            />
           </View>
         )}
+
+        {/* Only show the search input once a specific mode (not 'all') is selected */}
+        {mode !== 'all' ? (
+          <>
+                {/* job suggestions (professional mode removed) */}
+
+            <View style={styles.searchRow}>
+              <TextInput placeholder="Search (title, location, name...)" value={query} onChangeText={setQuery} style={styles.input} returnKeyType="search" onSubmitEditing={runSearch} />
+              <TouchableOpacity style={styles.searchBtn} onPress={runSearch}>
+                <Text style={{ color: 'white' }}>Search</Text>
+              </TouchableOpacity>
+            </View>
+          </>
+          ) : (
+          <View style={{ paddingVertical: 8 }}>
+            <Text style={{ color: '#444' }}>Please select Jobs or Accom to start searching.</Text>
+          </View>
+        )}
+      </View>
+
+      <MapView
+        ref={mapRef}
+        style={{ flex: 1 }}
+        initialRegion={{
+          latitude: userLocation?.latitude || 20,
+          longitude: userLocation?.longitude || 0,
+          latitudeDelta: 40,
+          longitudeDelta: 40,
+        }}
+      >
+        {results.map(r => {
+          const lat = r.lat || r.latitude || r.locationLat;
+          const lng = r.lng || r.longitude || r.locationLng;
+          if (lat == null || lng == null) return null;
+                return (
+            <Marker key={r.id} coordinate={{ latitude: lat, longitude: lng }} title={r.name || r.title} description={r.location || r.country || ''} onPress={() => centerOn(r)} />
+          );
+        })}
+
+        {userLocation && (
+          <Marker coordinate={{ latitude: userLocation.latitude, longitude: userLocation.longitude }} pinColor="blue" title="You" />
+        )}
+      </MapView>
+
+      <View style={styles.resultsContainer}>
+        <FlatList
+          data={results}
+          horizontal
+          keyExtractor={it => it.id}
+          renderItem={({ item }) => (
+            <TouchableOpacity onPress={() => centerOn(item)} style={[styles.resultCard, selected && selected.id === item.id && styles.resultActive]}>
+              <Image source={{ uri: item.image || (item._type === 'job' ? item.image : undefined) }} style={styles.avatar} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.resultTitle}>{item.name || item.title}</Text>
+                <Text style={styles.resultSub}>{item._distance != null ? (item._distance < 1 ? `${Math.round(item._distance * 1000)} m` : `${item._distance.toFixed(1)} km`) : (item.location || item.country || '')}</Text>
+                <Text style={styles.resultType}>{item._type}</Text>
+              </View>
+            </TouchableOpacity>
+          )}
+        />
       </View>
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  searchBar: {
+    paddingTop: Platform.OS === 'ios' ? 18 : 6,
+    paddingHorizontal: 12,
+    backgroundColor: '#fff',
+    zIndex: 10,
+  },
+  segment: { flexDirection: 'row', marginBottom: 8 },
+  segBtn: { paddingVertical: 6, paddingHorizontal: 8, borderRadius: 6, marginRight: 6, backgroundColor: '#f0f0f0' },
+  segActive: { backgroundColor: '#2874ff' },
+  segTxt: { color: '#000' },
+  categoryRow: { marginBottom: 8 },
+  catChip: { paddingVertical: 6, paddingHorizontal: 10, marginRight: 8, borderRadius: 20, backgroundColor: '#f0f0f0' },
+  catActive: { backgroundColor: '#2874ff' },
+  searchRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
+  input: { flex: 1, backgroundColor: '#f8f8f8', borderRadius: 8, paddingHorizontal: 12, height: 40 },
+  searchBtn: { marginLeft: 8, backgroundColor: '#2874ff', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 },
+  suggestionsBox: { backgroundColor: '#fff', borderRadius: 6, maxHeight: 160, borderWidth: 1, borderColor: '#eee', marginBottom: 8 },
+  suggestionItem: { paddingVertical: 10, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: '#f1f1f1' },
+  resultsContainer: { position: 'absolute', bottom: 8, left: 0, right: 0, paddingHorizontal: 10 },
+  resultCard: { backgroundColor: '#fff', padding: 10, marginRight: 10, borderRadius: 8, width: 260, flexDirection: 'row', alignItems: 'center' },
+  resultActive: { borderWidth: 2, borderColor: '#2874ff' },
+  avatar: { width: 56, height: 56, borderRadius: 28, marginRight: 10 },
+  resultTitle: { fontWeight: '600' },
+  resultSub: { color: '#666', fontSize: 12 },
+  resultType: { marginTop: 4, fontSize: 11, color: '#333' },
+});

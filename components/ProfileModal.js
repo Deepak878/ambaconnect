@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Modal, View, Text, TouchableOpacity, Image, TextInput, Alert, ActivityIndicator } from 'react-native';
 import * as Location from 'expo-location';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+// persistence removed: no AsyncStorage usage here
 import { shared, Colors } from './Theme';
 
 const placeholder = require('../assets/icon.png');
@@ -57,10 +57,7 @@ export default function ProfileModal({ visible, user = null, onClose, onSave }) 
   };
 
   const handleLogout = async () => {
-    try {
-      await AsyncStorage.removeItem('user');
-    } catch (e) {}
-    // inform parent to clear user
+    // inform parent to clear user (in-memory)
     onSave(null);
     onClose();
   };
