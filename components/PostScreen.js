@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { ScrollView, TextInput, TouchableOpacity, Text, View, Alert, Modal, FlatList, Switch, ActivityIndicator } from 'react-native';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import MapView, { Marker, UrlTile } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { Colors, shared } from './Theme';
 import { app, db } from '../firebaseConfig';
-import { collection, addDoc, serverTimestamp, doc, getDoc } from 'firebase/firestore';
+import { serverTimestamp, doc, getDoc, setDoc } from 'firebase/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 
@@ -74,6 +75,8 @@ export default function PostScreen({ onPost }) {
   const [durationEnabled, setDurationEnabled] = useState(false);
   const [startDate, setStartDate] = useState(''); // YYYY-MM-DD
   const [endDate, setEndDate] = useState('');
+  const [showStartPicker, setShowStartPicker] = useState(false);
+  const [showEndPicker, setShowEndPicker] = useState(false);
 
   // profile photo picker removed
 
@@ -173,11 +176,9 @@ export default function PostScreen({ onPost }) {
             payload.userPhone = localUser.phone || localUser.id;
             payload.createdById = localUser.id;
           }
-          console.log(payload)
-          const ref = await addDoc(collection(db, 'jobs'), payload);
-          console.log(ref)
-          const id = ref.id;
-          onPost && onPost({ ...job, id });
+          const docId = `${localUser.id}_${Date.now()}`;
+          await setDoc(doc(db, 'jobs', docId), payload);
+          onPost && onPost({ ...job, id: docId });
           Alert.alert('Posted', 'Job posted');
         } catch (err) {
           console.error('Failed to write job to Firestore', err);
@@ -185,6 +186,7 @@ export default function PostScreen({ onPost }) {
         }
       } else if (postKind === 'accommodation') {
         if (!accomType || !rent || !city || !accomAvailability) { Alert.alert('Missing', 'Provide BHK, rent, city and availability'); return; }
+        if (!pickerMarker) { Alert.alert('Location Required', 'Please pick a location on the map for this accommodation post'); return; }
         const accom = {
           kind: 'accommodation',
           title: `${accomType} available in ${city}`,
@@ -195,8 +197,8 @@ export default function PostScreen({ onPost }) {
           location: pickerMarker ? `${pickerCity || city} ${pickerDistanceKm ? '(' + pickerDistanceKm.toFixed(1) + ' km away)' : ''}` : `${street || ''} ${city}`.trim(),
           description: description || 'Sharing available',
           contact: contact || 'Hidden until profile tapped',
-          lat: pickerMarker ? pickerMarker.latitude : (userLocation ? userLocation.latitude + (Math.random() - 0.5) * 0.02 : 37.78825),
-          lng: pickerMarker ? pickerMarker.longitude : (userLocation ? userLocation.longitude + (Math.random() - 0.5) * 0.02 : -122.4324),
+          lat: pickerMarker.latitude,
+          lng: pickerMarker.longitude,
           createdAt: new Date().toISOString(),
           images: [],
           duration: durationEnabled ? { start: startDate || null, end: endDate || null } : null,
@@ -204,26 +206,37 @@ export default function PostScreen({ onPost }) {
         // write to Firestore `accommodations` collection
         try {
           const payload = { ...accom, createdAt: serverTimestamp() };
+          // require local user similar to job posting
           let localUser = null;
-          try { const local = await AsyncStorage.getItem('user'); if (local) { localUser = JSON.parse(local); payload.createdBy = localUser; } } catch (_) {}
           try {
-            if (localUser && localUser.id) {
-              const userDocRef = doc(db, 'users', localUser.id);
-              const userSnap = await getDoc(userDocRef);
-              if (userSnap && userSnap.exists && userSnap.exists()) {
-                const serverUser = userSnap.data() || {};
-                payload.userPhone = serverUser.phone || localUser.phone || localUser.id;
-              } else {
-                payload.userPhone = localUser.phone || localUser.id;
-              }
+            const local = await AsyncStorage.getItem('user');
+            if (local) { localUser = JSON.parse(local); payload.createdBy = localUser; }
+          } catch (_) { /* ignore */ }
+
+          if (!localUser || !localUser.id) {
+            Alert.alert('Login required', 'Please login or register before posting.');
+            return;
+          }
+
+          try {
+            const userDocRef = doc(db, 'users', localUser.id);
+            const userSnap = await getDoc(userDocRef);
+            if (userSnap && (typeof userSnap.exists === 'function' ? userSnap.exists() : userSnap.exists)) {
+              const serverUser = userSnap.data() || {};
+              payload.userPhone = serverUser.phone || localUser.phone || localUser.id;
+            } else {
+              payload.userPhone = localUser.phone || localUser.id;
             }
+            payload.createdById = localUser.id;
           } catch (readErr) {
             console.warn('Failed to read users doc, using local phone', readErr);
-            if (localUser) payload.userPhone = localUser.phone || localUser.id;
+            payload.userPhone = localUser.phone || localUser.id;
+            payload.createdById = localUser.id;
           }
-          const ref = await addDoc(collection(db, 'accommodations'), payload);
-          const id = ref.id;
-          onPost && onPost({ ...accom, id });
+
+          const docId = `${localUser.id}_${Date.now()}`;
+          await setDoc(doc(db, 'accommodations', docId), payload);
+          onPost && onPost({ ...accom, id: docId });
           Alert.alert('Posted', 'Accommodation posted');
         } catch (err) {
           console.error('Failed to write accommodation to Firestore', err);
@@ -294,6 +307,52 @@ export default function PostScreen({ onPost }) {
               </View>
             ))}
           </View>
+          <View style={{ marginTop: 12 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+              <Switch value={durationEnabled} onValueChange={setDurationEnabled} />
+              <Text style={{ marginLeft: 8 }}>Set duration (start / end dates)</Text>
+            </View>
+            {durationEnabled ? (
+              <View>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                  <TouchableOpacity onPress={() => setShowStartPicker(true)} style={[shared.smallButton, { marginRight: 8 }]}>
+                    <Text>{startDate ? startDate : 'Pick start date'}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => setShowEndPicker(true)} style={shared.smallButton}>
+                    <Text>{endDate ? endDate : 'Pick end date'}</Text>
+                  </TouchableOpacity>
+                </View>
+                {showStartPicker && (
+                  <DateTimePicker
+                    value={startDate ? new Date(startDate) : new Date()}
+                    mode="date"
+                    display="default"
+                    onChange={(e, d) => {
+                      setShowStartPicker(false);
+                      if (d) {
+                        const iso = d.toISOString().slice(0,10);
+                        setStartDate(iso);
+                      }
+                    }}
+                  />
+                )}
+                {showEndPicker && (
+                  <DateTimePicker
+                    value={endDate ? new Date(endDate) : new Date()}
+                    mode="date"
+                    display="default"
+                    onChange={(e, d) => {
+                      setShowEndPicker(false);
+                      if (d) {
+                        const iso = d.toISOString().slice(0,10);
+                        setEndDate(iso);
+                      }
+                    }}
+                  />
+                )}
+              </View>
+            ) : null}
+          </View>
         </>
       )}
 
@@ -309,9 +368,59 @@ export default function PostScreen({ onPost }) {
               <Text style={{ color: accomAvailability==='Whole' ? Colors.card : Colors.primary }}>Whole</Text>
             </TouchableOpacity>
           </View>
+          <TouchableOpacity onPress={openMapPicker} style={[shared.smallButton, { alignSelf: 'flex-start', marginTop: 8 }]}>
+            <Text>Pick location on map</Text>
+          </TouchableOpacity>
+          {pickerMarker && (
+            <Text style={{ marginTop: 8, color: Colors.muted }}>Picked: {pickerCity || 'Picked location'} {pickerDistanceKm ? '— ' + pickerDistanceKm.toFixed(1) + ' km away' : ''}</Text>
+          )}
           <TextInput placeholder="City" value={city} onChangeText={setCity} style={[shared.input, { marginTop: 8 }]} />
           <TextInput placeholder="Street / Area (don't put full home address)" value={street} onChangeText={setStreet} style={[shared.input, { marginTop: 8 }]} />
         </>
+      )}
+
+      {/* shared duration UI for accommodations (in case user toggles on accom specific) */}
+      {postKind === 'accommodation' && (
+        <View style={{ marginTop: 12 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+            <Switch value={durationEnabled} onValueChange={setDurationEnabled} />
+            <Text style={{ marginLeft: 8 }}>Set duration (start / end dates)</Text>
+          </View>
+          {durationEnabled ? (
+            <View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                <TouchableOpacity onPress={() => setShowStartPicker(true)} style={[shared.smallButton, { marginRight: 8 }]}>
+                  <Text>{startDate ? startDate : 'Pick start date'}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => setShowEndPicker(true)} style={shared.smallButton}>
+                  <Text>{endDate ? endDate : 'Pick end date'}</Text>
+                </TouchableOpacity>
+              </View>
+              {showStartPicker && (
+                <DateTimePicker
+                  value={startDate ? new Date(startDate) : new Date()}
+                  mode="date"
+                  display="default"
+                  onChange={(e, d) => {
+                    setShowStartPicker(false);
+                    if (d) setStartDate(d.toISOString().slice(0,10));
+                  }}
+                />
+              )}
+              {showEndPicker && (
+                <DateTimePicker
+                  value={endDate ? new Date(endDate) : new Date()}
+                  mode="date"
+                  display="default"
+                  onChange={(e, d) => {
+                    setShowEndPicker(false);
+                    if (d) setEndDate(d.toISOString().slice(0,10));
+                  }}
+                />
+              )}
+            </View>
+          ) : null}
+        </View>
       )}
 
   {/* Professional posting UI removed */}

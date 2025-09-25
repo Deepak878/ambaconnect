@@ -189,7 +189,7 @@ import { Colors, shared } from './Theme';
 // Firestore usage for users collection
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { app, db } from '../firebaseConfig';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 
 export default function AuthScreen({ onLogin, onClose }) {
   const [isRegister, setIsRegister] = useState(false);
@@ -210,13 +210,27 @@ export default function AuthScreen({ onLogin, onClose }) {
     try {
       const id = normalized;
       if (isRegister) {
-        // Local registration only: persist the user locally to AsyncStorage
-        const out = { id, name: name || 'Anonymous', phone: normalized, dob: dob || null };
-        try { await AsyncStorage.setItem('user', JSON.stringify(out)); } catch (e) { console.error('Failed to save local user', e); }
-        Alert.alert('Account Created', 'User registered locally.');
-        setName(''); setPhone(''); setDob('');
-        onLogin(out);
-        return;
+        // Register user in Firestore
+        try {
+          const userRef = doc(db, 'users', id);
+          const existing = await getDoc(userRef);
+          if (existing && existing.exists && existing.exists()) {
+            Alert.alert('Already registered', 'This phone number is already registered. Please login.');
+            return;
+          }
+          const payload = { name: name || 'Anonymous', phone: normalized, dob: dob || null, createdAt: serverTimestamp(), lastLogin: serverTimestamp() };
+          await setDoc(userRef, payload, { merge: true });
+          const out = { id, name: name || 'Anonymous', phone: normalized, dob: dob || null, createdAt: new Date().toISOString(), lastLogin: new Date().toISOString() };
+          try { await AsyncStorage.setItem('user', JSON.stringify(out)); } catch (e) { console.error('Failed to save local user', e); }
+          Alert.alert('Account Created', 'User registered successfully.');
+          setName(''); setPhone(''); setDob('');
+          onLogin(out);
+          return;
+        } catch (err) {
+          console.error('Registration failed', err);
+          Alert.alert('Error', 'Unable to create account on server. Please try again later.');
+          return;
+        }
       } else {
         // Try Firestore users collection first (if available)
         try {

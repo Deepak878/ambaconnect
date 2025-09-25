@@ -107,11 +107,13 @@ export default function ProfileModal({ visible, user = null, onClose, onSave }) 
             <Text style={shared.primaryButtonText}>Save Profile</Text>
           </TouchableOpacity>
         </View>
-        <View style={{ marginTop: 12 }}>
-          <TouchableOpacity onPress={handleLogout} style={[shared.smallButton, { backgroundColor: Colors.card }]}>
-            <Text style={{ color: Colors.primary }}>Logout</Text>
-          </TouchableOpacity>
-        </View>
+        {user ? (
+          <View style={{ marginTop: 12 }}>
+            <TouchableOpacity onPress={handleLogout} style={[shared.smallButton, { backgroundColor: Colors.card }]}>
+              <Text style={{ color: Colors.primary }}>Logout</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
       </View>
     </Modal>
   );

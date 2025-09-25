@@ -45,12 +45,40 @@ export default function JobDetailModal({ visibleJob, onClose, showContact, setSh
             ) : (
               <Text style={{ marginTop: 8 }}>{visibleJob.salary} {visibleJob.currency ? visibleJob.currency : ''} {visibleJob.salaryType === 'hourly' ? '/hr' : '/week'}</Text>
             )}
+
+            {/* show createdBy / userPhone if present */}
+            {visibleJob.createdBy && visibleJob.createdBy.name ? (
+              <Text style={{ color: Colors.muted, marginTop: 6 }}>Posted by {visibleJob.createdBy.name}{visibleJob.userPhone ? ` • ${visibleJob.userPhone}` : ''}</Text>
+            ) : visibleJob.userPhone ? (
+              <Text style={{ color: Colors.muted, marginTop: 6 }}>Posted by {visibleJob.userPhone}</Text>
+            ) : null}
+            {visibleJob.createdAt ? (
+              <Text style={{ color: Colors.muted, marginTop: 4, fontSize: 12 }}>Posted: {typeof visibleJob.createdAt === 'object' && visibleJob.createdAt.toDate ? visibleJob.createdAt.toDate().toLocaleString() : String(visibleJob.createdAt)}</Text>
+            ) : null}
           </View>
 
           <View style={{ marginTop: 16 }}>
             <Text style={{ fontWeight: '700' }}>Description</Text>
             <Text style={{ marginTop: 6 }}>{visibleJob.description || 'No description provided'}</Text>
           </View>
+
+          {visibleJob.schedule && typeof visibleJob.schedule === 'object' && Object.keys(visibleJob.schedule).length ? (
+            <View style={{ marginTop: 12 }}>
+              <Text style={{ fontWeight: '700' }}>Schedule</Text>
+              {Object.keys(visibleJob.schedule).map(k => (
+                visibleJob.schedule[k] && visibleJob.schedule[k].enabled ? (
+                  <Text key={k} style={{ marginTop: 6 }}>{k}: {visibleJob.schedule[k].start} - {visibleJob.schedule[k].end}</Text>
+                ) : null
+              ))}
+            </View>
+          ) : null}
+
+          {visibleJob.duration ? (
+            <View style={{ marginTop: 12 }}>
+              <Text style={{ fontWeight: '700' }}>Duration</Text>
+              <Text style={{ marginTop: 6 }}>{visibleJob.duration.start || 'N/A'} — {visibleJob.duration.end || 'N/A'}</Text>
+            </View>
+          ) : null}
 
           {isAccom && (
             <View style={[shared.card, { marginTop: 12 }]}> 

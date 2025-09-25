@@ -2,43 +2,60 @@
 
 
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TextInput, TouchableOpacity, FlatList, Image, StyleSheet, Platform, ActivityIndicator, Alert } from 'react-native';
-import MapView, { Marker } from 'react-native-maps';
+import { View, Text, TouchableOpacity, FlatList, Image, StyleSheet, Platform, ActivityIndicator } from 'react-native';
+import MapView, { Marker, Callout } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { Colors, shared } from './Theme';
+import { db } from '../firebaseConfig';
+import { collection, query as fsQuery, orderBy, onSnapshot } from 'firebase/firestore';
 
-export default function MapScreen({ jobs = [], accommodations = [], userLocation = null, onOpenJob = () => {} }) {
+export default function MapScreen({ jobs: propJobs = [], accommodations: propAccom = [], userLocation = null, onOpenJob = () => {}, onSave = null, savedIds = [] }) {
   const mapRef = useRef(null);
   const [mode, setMode] = useState('all'); // 'all' | 'jobs' | 'accommodations'
-  const [query, setQuery] = useState('');
+  const [jobFilter, setJobFilter] = useState('all'); // 'all' | 'part' | 'full'
   const [accomFilter, setAccomFilter] = useState('all'); // 'all' | 'owned' | 'shared'
   const [selectedJobForPros, setSelectedJobForPros] = useState(null);
   const [results, setResults] = useState([]);
   const [selected, setSelected] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [jobs, setJobs] = useState(propJobs || []);
+  const [accommodations, setAccommodations] = useState(propAccom || []);
 
 
   useEffect(() => {
     runSearch();
-  }, [mode, query, jobs, accommodations, userLocation, accomFilter]);
+  }, [mode, jobFilter, jobs, accommodations, userLocation, accomFilter]);
+
+  useEffect(() => {
+    // subscribe to Firestore jobs and accommodations
+    const qJobs = fsQuery(collection(db, 'jobs'), orderBy('createdAt', 'desc'));
+    const qAcc = fsQuery(collection(db, 'accommodations'), orderBy('createdAt', 'desc'));
+    const unsubJobs = onSnapshot(qJobs, snap => {
+      const arr = snap.docs.map(d => ({ id: d.id, ...(d.data() || {}) }));
+      setJobs(arr);
+    }, err => console.warn('jobs snapshot error', err));
+    const unsubAcc = onSnapshot(qAcc, snap => {
+      const arr = snap.docs.map(d => ({ id: d.id, ...(d.data() || {}) }));
+      setAccommodations(arr);
+    }, err => console.warn('accommodations snapshot error', err));
+
+    return () => { unsubJobs(); unsubAcc(); };
+  }, []);
 
   function runSearch() {
-    const q = (query || '').trim().toLowerCase();
     let items = [];
 
     if (mode === 'jobs' || mode === 'all') {
       const found = (jobs || []).filter(j => {
-        if (!q) return true;
-        return (j.title || '').toLowerCase().includes(q) || (j.tags || []).join(' ').toLowerCase().includes(q) || (j.location || '').toLowerCase().includes(q);
+        if (jobFilter === 'part') return (j.type || '').toLowerCase().includes('part');
+        if (jobFilter === 'full') return (j.type || '').toLowerCase().includes('full');
+        return true;
       }).map(j => ({ ...j, _type: 'job' }));
       items = items.concat(found);
     }
 
     if (mode === 'accommodations' || mode === 'all') {
-      let found = (accommodations || []).filter(a => {
-        if (!q) return true;
-        return (a.title || a.accomType || '').toLowerCase().includes(q) || (a.tags || []).join(' ').toLowerCase().includes(q) || (a.location || '').toLowerCase().includes(q);
-      }).map(a => ({ ...a, _type: 'accommodation' }));
+      let found = (accommodations || []).map(a => ({ ...a, _type: 'accommodation' }));
 
       if (mode === 'accommodations' && accomFilter === 'owned') {
         found = found.filter(a => !!a.owner);
@@ -106,37 +123,38 @@ export default function MapScreen({ jobs = [], accommodations = [], userLocation
 
         {/* no professional categories */}
 
-        {mode === 'accommodations' && (
-          <View style={styles.categoryRow}>
-            <FlatList
-              horizontal
-              data={[{k:'all', t:'All'}, {k:'owned', t:'Owned'}, {k:'shared', t:'Shared'}]}
-              keyExtractor={c => c.k}
-              renderItem={({ item }) => (
-                <TouchableOpacity onPress={() => setAccomFilter(item.k)} style={[styles.catChip, item.k === accomFilter && styles.catActive]}>
-                  <Text style={{ color: item.k === accomFilter ? '#fff' : '#333' }}>{item.t}</Text>
-                </TouchableOpacity>
-              )}
-              showsHorizontalScrollIndicator={false}
-            />
-          </View>
-        )}
+        {/* accomodation filter moved below to avoid duplication */}
 
-        {/* Only show the search input once a specific mode (not 'all') is selected */}
+        {/* Job filter (All / Part-time / Full-time) and accomodation filters */}
         {mode !== 'all' ? (
           <>
-                {/* job suggestions (professional mode removed) */}
+            {mode === 'jobs' && (
+              <View style={{ flexDirection: 'row', marginBottom: 8 }}>
+                <TouchableOpacity style={[styles.segBtn, jobFilter === 'all' ? styles.segActive : null, { marginRight: 8 }]} onPress={() => setJobFilter('all')}><Text style={styles.segTxt}>All</Text></TouchableOpacity>
+                <TouchableOpacity style={[styles.segBtn, jobFilter === 'part' ? styles.segActive : null, { marginRight: 8 }]} onPress={() => setJobFilter('part')}><Text style={styles.segTxt}>Part-time</Text></TouchableOpacity>
+                <TouchableOpacity style={[styles.segBtn, jobFilter === 'full' ? styles.segActive : null]} onPress={() => setJobFilter('full')}><Text style={styles.segTxt}>Full-time</Text></TouchableOpacity>
+              </View>
+            )}
 
-            <View style={styles.searchRow}>
-              <TextInput placeholder="Search (title, location, name...)" value={query} onChangeText={setQuery} style={styles.input} returnKeyType="search" onSubmitEditing={runSearch} />
-              <TouchableOpacity style={styles.searchBtn} onPress={runSearch}>
-                <Text style={{ color: 'white' }}>Search</Text>
-              </TouchableOpacity>
-            </View>
+            {mode === 'accommodations' && (
+              <View style={styles.categoryRow}>
+                <FlatList
+                  horizontal
+                  data={[{k:'all', t:'All'}, {k:'owned', t:'Owned'}, {k:'shared', t:'Shared'}]}
+                  keyExtractor={c => c.k}
+                  renderItem={({ item }) => (
+                    <TouchableOpacity onPress={() => setAccomFilter(item.k)} style={[styles.catChip, item.k === accomFilter && styles.catActive]}>
+                      <Text style={{ color: item.k === accomFilter ? '#fff' : '#333' }}>{item.t}</Text>
+                    </TouchableOpacity>
+                  )}
+                  showsHorizontalScrollIndicator={false}
+                />
+              </View>
+            )}
           </>
-          ) : (
+        ) : (
           <View style={{ paddingVertical: 8 }}>
-            <Text style={{ color: '#444' }}>Please select Jobs or Accom to start searching.</Text>
+            <Text style={{ color: '#444' }}>Please select Jobs or Accom to view markers.</Text>
           </View>
         )}
       </View>
@@ -155,8 +173,17 @@ export default function MapScreen({ jobs = [], accommodations = [], userLocation
           const lat = r.lat || r.latitude || r.locationLat;
           const lng = r.lng || r.longitude || r.locationLng;
           if (lat == null || lng == null) return null;
-                return (
-            <Marker key={r.id} coordinate={{ latitude: lat, longitude: lng }} title={r.name || r.title} description={r.location || r.country || ''} onPress={() => centerOn(r)} />
+            return (
+                <Marker key={r.id} coordinate={{ latitude: lat, longitude: lng }} title={r.name || r.title} description={r.location || r.country || ''} onPress={() => { centerOn(r); }}>
+                  <Callout onPress={() => onOpenJob(r)}>
+                    <View style={{ maxWidth: 220 }}>
+                      <Text style={{ fontWeight: '600' }}>{r.name || r.title}</Text>
+                      <Text style={{ color: '#666', marginTop: 4 }}>{r.location || r.country || ''}</Text>
+                      {r.duration ? <Text style={{ color: '#666', marginTop: 6 }}>Duration: {r.duration.start || 'N/A'} — {r.duration.end || 'N/A'}</Text> : null}
+                      <Text style={{ color: '#2874ff', marginTop: 6 }}>See details</Text>
+                    </View>
+                  </Callout>
+                </Marker>
           );
         })}
 
@@ -165,18 +192,25 @@ export default function MapScreen({ jobs = [], accommodations = [], userLocation
         )}
       </MapView>
 
+      {/* small info panel shown when marker/card selected */}
+      {/* Marker popup removed — marker press now opens the job detail modal directly */}
+
+      {/* Detail modal for full info */}
+      {/* Full detail modal removed from here — Map markers/cards open the main JobDetailModal via onOpenJob */}
+
       <View style={styles.resultsContainer}>
         <FlatList
           data={results}
           horizontal
           keyExtractor={it => it.id}
           renderItem={({ item }) => (
-            <TouchableOpacity onPress={() => centerOn(item)} style={[styles.resultCard, selected && selected.id === item.id && styles.resultActive]}>
+            <TouchableOpacity onPress={() => onOpenJob(item)} style={[styles.resultCard, selected && selected.id === item.id && styles.resultActive]}>
               <Image source={{ uri: item.image || (item._type === 'job' ? item.image : undefined) }} style={styles.avatar} />
               <View style={{ flex: 1 }}>
                 <Text style={styles.resultTitle}>{item.name || item.title}</Text>
-                <Text style={styles.resultSub}>{item._distance != null ? (item._distance < 1 ? `${Math.round(item._distance * 1000)} m` : `${item._distance.toFixed(1)} km`) : (item.location || item.country || '')}</Text>
-                <Text style={styles.resultType}>{item._type}</Text>
+                    <Text style={styles.resultSub}>{item._distance != null ? (item._distance < 1 ? `${Math.round(item._distance * 1000)} m` : `${item._distance.toFixed(1)} km`) : (item.location || item.country || '')}</Text>
+                    {item.duration ? <Text style={[styles.resultSub, { marginTop: 6 }]}>Duration: {item.duration.start || 'N/A'} — {item.duration.end || 'N/A'}</Text> : null}
+                    <Text style={styles.resultType}>{item._type}</Text>
               </View>
             </TouchableOpacity>
           )}

@@ -1,5 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { View, TextInput, TouchableOpacity, Text, FlatList } from 'react-native';
+import { db } from '../firebaseConfig';
+import { collection, query as fsQuery, orderBy, onSnapshot } from 'firebase/firestore';
 import JobItem from './JobItem';
 import { Colors, shared } from './Theme';
 
@@ -13,10 +15,11 @@ const haversineKm = (lat1, lon1, lat2, lon2) => {
   return R * c;
 };
 
-export default function JobsScreen({ jobs, onOpenJob, onSaveJob, savedIds, filters, userLocation }) {
+export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, savedIds, filters, userLocation }) {
   const [query, setQuery] = useState('');
   const [partTimeOnly, setPartTimeOnly] = useState(filters?.partTimeOnly || false);
   const [filterKind, setFilterKind] = useState('all'); // 'all' | 'job' | 'accommodation'
+  const [jobs, setJobs] = useState([]);
 
   const enriched = useMemo(() => {
     return jobs.map(j => {
@@ -27,6 +30,31 @@ export default function JobsScreen({ jobs, onOpenJob, onSaveJob, savedIds, filte
       return { ...j, _distanceKm: distance };
     });
   }, [jobs, userLocation]);
+
+  useEffect(() => {
+    // subscribe to jobs and accommodations collections and merge
+    const jobsQ = fsQuery(collection(db, 'jobs'), orderBy('createdAt', 'desc'));
+    const accQ = fsQuery(collection(db, 'accommodations'), orderBy('createdAt', 'desc'));
+
+    const unsubJobs = onSnapshot(jobsQ, snap => {
+      const arr = snap.docs.map(d => ({ id: d.id, ...(d.data() || {}) }));
+      setJobs(prev => {
+        // merge while keeping accommodations present
+        const other = prev.filter(p => p.kind === 'accommodation');
+        return [...arr, ...other];
+      });
+    }, err => console.warn('jobs snapshot error', err));
+
+    const unsubAcc = onSnapshot(accQ, snap => {
+      const arr = snap.docs.map(d => ({ id: d.id, ...(d.data() || {}) }));
+      setJobs(prev => {
+        const other = prev.filter(p => p.kind === 'job');
+        return [...other, ...arr];
+      });
+    }, err => console.warn('accommodations snapshot error', err));
+
+    return () => { unsubJobs(); unsubAcc(); };
+  }, []);
 
   const filtered = useMemo(() => {
     return enriched.filter(j => {

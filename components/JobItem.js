@@ -34,11 +34,13 @@ export default function JobItem({ item, onOpen, onSave, saved, userLocation }) {
           <>
             <Text style={styles.jobMeta}>Rent: {item.rent} {item.currency ? item.currency : ''} • {distanceLabel}</Text>
             {item.availability ? <Text style={styles.jobMeta}>Availability: {item.availability}</Text> : null}
+            {item.duration ? <Text style={styles.jobMeta}>Duration: {item.duration.start || 'N/A'} — {item.duration.end || 'N/A'}</Text> : null}
           </>
         ) : (
           <>
             <Text style={styles.jobMeta}>{item.type} • {distanceLabel}</Text>
             <Text style={styles.jobMeta}>{item.salary} {item.currency ? item.currency : ''} {item.salaryType === 'hourly' ? '/hr' : '/week'}</Text>
+            {item.duration ? <Text style={styles.jobMeta}>Duration: {item.duration.start || 'N/A'} — {item.duration.end || 'N/A'}</Text> : null}
           </>
         )}
       </View>
