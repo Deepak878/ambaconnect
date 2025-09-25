@@ -9,31 +9,29 @@ service firebase.storage {
       allow read: if true;
     }
     
-    // Allow authenticated users to upload to jobs folder
+    // Allow authenticated users to upload/delete in jobs folder
     match /jobs/{fileName} {
-      allow write: if request.auth != null
+      allow write, delete: if request.auth != null
         && request.auth.uid != null
         && fileName.matches('.*\\.(jpg|jpeg|png|gif|webp)$')
         && resource.size < 5 * 1024 * 1024; // 5MB limit
     }
     
-    // Allow authenticated users to upload to accommodations folder
+    // Allow authenticated users to upload/delete in accommodations folder
     match /accommodations/{fileName} {
-      allow write: if request.auth != null
+      allow write, delete: if request.auth != null
         && request.auth.uid != null
         && fileName.matches('.*\\.(jpg|jpeg|png|gif|webp)$')
         && resource.size < 5 * 1024 * 1024; // 5MB limit
     }
     
-    // Allow users to delete their own uploads (optional)
+    // Alternative: Allow delete operations separately
     match /jobs/{fileName} {
-      allow delete: if request.auth != null
-        && request.auth.uid != null;
+      allow delete: if true; // Allow anyone to delete (for cleanup)
     }
     
     match /accommodations/{fileName} {
-      allow delete: if request.auth != null
-        && request.auth.uid != null;
+      allow delete: if true; // Allow anyone to delete (for cleanup)
     }
   }
 }

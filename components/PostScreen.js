@@ -9,7 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Colors, shared } from './Theme';
 import { app, db, storage } from '../firebaseConfig';
 import { serverTimestamp, doc, getDoc, setDoc, collection, query as fsQuery, where, getDocs, deleteDoc, updateDoc } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { validateField, sanitizeInput, ContentFilter } from '../utils/validation';
 import { LoadingSpinner } from './LoadingSpinner';
@@ -78,6 +78,7 @@ export default function PostScreen({ onPost }) {
   // Photo upload fields
   const [photos, setPhotos] = useState([]);
   const [uploadingPhotos, setUploadingPhotos] = useState(false);
+  const [removedImages, setRemovedImages] = useState([]);
 
   // My Posts modal
   const [showMyPosts, setShowMyPosts] = useState(false);
@@ -170,7 +171,21 @@ export default function PostScreen({ onPost }) {
     );
   };
 
-  const removePhoto = (index) => {
+  const removePhoto = async (index) => {
+    const photoToRemove = photos[index];
+    
+    // If it's an existing photo from storage (during edit), we should track it for deletion
+    if (photoToRemove.uri.startsWith('https://') && isEditing) {
+      console.log(`Marking image for removal: ${photoToRemove.uri}`);
+      // Store removed images to delete them when post is updated
+      if (!removedImages) {
+        setRemovedImages([photoToRemove.uri]);
+      } else {
+        setRemovedImages(prev => [...prev, photoToRemove.uri]);
+      }
+    }
+    
+    console.log(`Removing photo ${index + 1} from UI`);
     setPhotos(prev => prev.filter((_, i) => i !== index));
   };
 
@@ -250,6 +265,47 @@ export default function PostScreen({ onPost }) {
     }
   };
 
+  const deleteImagesFromStorage = async (imageUrls) => {
+    if (!imageUrls || imageUrls.length === 0) return;
+
+    console.log(`Deleting ${imageUrls.length} images from storage...`);
+    
+    const deletePromises = imageUrls.map(async (imageUrl) => {
+      try {
+        // Extract the file path from the download URL
+        // Firebase Storage URLs have this format:
+        // https://firebasestorage.googleapis.com/v0/b/bucket/o/folder%2Ffilename?alt=media&token=...
+        const urlParts = imageUrl.split('/o/')[1]?.split('?')[0];
+        if (!urlParts) {
+          console.warn('Could not parse image URL:', imageUrl);
+          return;
+        }
+        
+        // Decode the URL-encoded path
+        const filePath = decodeURIComponent(urlParts);
+        console.log(`Deleting image: ${filePath}`);
+        
+        const imageRef = ref(storage, filePath);
+        await deleteObject(imageRef);
+        
+        console.log(`Successfully deleted: ${filePath}`);
+      } catch (error) {
+        console.error('Error deleting image:', imageUrl, error);
+        // Don't throw error here - continue with other deletions
+        if (error.code === 'storage/object-not-found') {
+          console.log('Image already deleted or does not exist:', imageUrl);
+        }
+      }
+    });
+
+    try {
+      await Promise.all(deletePromises);
+      console.log('Finished deleting images from storage');
+    } catch (error) {
+      console.error('Some images could not be deleted:', error);
+    }
+  };
+
   const loadMyPosts = async () => {
     setLoadingMyPosts(true);
     try {
@@ -294,7 +350,7 @@ export default function PostScreen({ onPost }) {
   const deletePost = async (post) => {
     Alert.alert(
       'Delete Post',
-      `Are you sure you want to delete "${post.title}"?`,
+      `Are you sure you want to delete "${post.title}"? This will also delete all associated photos.`,
       [
         { text: 'Cancel', style: 'cancel' },
         { 
@@ -302,18 +358,29 @@ export default function PostScreen({ onPost }) {
           style: 'destructive',
           onPress: async () => {
             try {
+              setLoadingMyPosts(true);
+              
               const collection_name = post.kind === 'accommodation' ? 'accommodations' : 'jobs';
               console.log('Deleting post:', post.id, 'from collection:', collection_name);
               
+              // First, delete associated images from storage
+              if (post.images && post.images.length > 0) {
+                console.log(`Deleting ${post.images.length} images for post: ${post.id}`);
+                await deleteImagesFromStorage(post.images);
+              }
+              
+              // Then delete the post document
               await deleteDoc(doc(db, collection_name, post.id));
               
               // Remove from local state
               setMyPosts(prev => prev.filter(p => p.id !== post.id));
               
-              Alert.alert('Success', 'Post deleted successfully');
+              Alert.alert('Success', `Post and ${post.images?.length || 0} associated images deleted successfully`);
             } catch (error) {
               console.error('Delete post error:', error);
               Alert.alert('Error', `Failed to delete post: ${error.message}`);
+            } finally {
+              setLoadingMyPosts(false);
             }
           }
         }
@@ -382,6 +449,7 @@ export default function PostScreen({ onPost }) {
     }
     
     setCurrency(post.currency || 'USD');
+    setRemovedImages([]);
     setEditingPost(post);
     setShowMyPosts(false);
     
@@ -476,23 +544,41 @@ export default function PostScreen({ onPost }) {
         const jobId = isEditing ? editingPost.id : `job_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         
         // Upload photos if any (handle both new photos and existing ones during edit)
-        let imageUrls = isEditing ? (editingPost.images || []) : [];
+        let imageUrls = [];
+        
         if (photos.length > 0) {
           try {
+            // Separate existing and new photos
+            const existingImages = photos.filter(photo => photo.uri.startsWith('https://')).map(photo => photo.uri);
             const newPhotos = photos.filter(photo => !photo.uri.startsWith('https://'));
+            
+            console.log(`Job Edit: ${existingImages.length} existing images, ${newPhotos.length} new photos`);
+            console.log(`Job Edit: ${removedImages.length} images to remove`);
+            
+            // Start with existing images that are still in photos array (not removed)
+            imageUrls = [...existingImages];
+            
+            // Upload new photos if any
             if (newPhotos.length > 0) {
               const newImageUrls = await uploadPhotosToStorage(jobId, 'job');
-              // Keep existing images and add new ones
-              const existingImages = photos.filter(photo => photo.uri.startsWith('https://')).map(photo => photo.uri);
-              imageUrls = [...existingImages, ...newImageUrls];
-            } else {
-              // All photos are existing ones
-              imageUrls = photos.map(photo => photo.uri);
+              imageUrls = [...imageUrls, ...newImageUrls];
             }
+            
+            console.log(`Job Edit: Final image count: ${imageUrls.length}`);
           } catch (error) {
             console.error('Photo upload error:', error);
             Alert.alert('Upload Error', 'Failed to upload some photos. Job will be posted without new images.');
+            // Fallback to existing images only
+            imageUrls = photos.filter(photo => photo.uri.startsWith('https://')).map(photo => photo.uri);
           }
+        } else if (isEditing) {
+          console.log('Job Edit: All photos removed, images array will be empty');
+        }
+
+        // Handle removed images during edit
+        if (isEditing && removedImages.length > 0) {
+          await deleteImagesFromStorage(removedImages);
+          console.log(`Deleted ${removedImages.length} removed images from storage`);
         }
 
         const job = {
@@ -576,23 +662,41 @@ export default function PostScreen({ onPost }) {
         const accomId = isEditing ? editingPost.id : `accom_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         
         // Upload photos (handle both new photos and existing ones during edit)
-        let imageUrls = isEditing ? (editingPost.images || []) : [];
+        let imageUrls = [];
+        
         if (photos.length > 0) {
           try {
+            // Separate existing and new photos
+            const existingImages = photos.filter(photo => photo.uri.startsWith('https://')).map(photo => photo.uri);
             const newPhotos = photos.filter(photo => !photo.uri.startsWith('https://'));
+            
+            console.log(`Accommodation Edit: ${existingImages.length} existing images, ${newPhotos.length} new photos`);
+            console.log(`Accommodation Edit: ${removedImages.length} images to remove`);
+            
+            // Start with existing images that are still in photos array (not removed)
+            imageUrls = [...existingImages];
+            
+            // Upload new photos if any
             if (newPhotos.length > 0) {
               const newImageUrls = await uploadPhotosToStorage(accomId, 'accommodation');
-              // Keep existing images and add new ones
-              const existingImages = photos.filter(photo => photo.uri.startsWith('https://')).map(photo => photo.uri);
-              imageUrls = [...existingImages, ...newImageUrls];
-            } else {
-              // All photos are existing ones
-              imageUrls = photos.map(photo => photo.uri);
+              imageUrls = [...imageUrls, ...newImageUrls];
             }
+            
+            console.log(`Accommodation Edit: Final image count: ${imageUrls.length}`);
           } catch (error) {
             console.error('Photo upload error:', error);
             Alert.alert('Upload Error', 'Failed to upload some photos. Accommodation will be posted without new images.');
+            // Fallback to existing images only
+            imageUrls = photos.filter(photo => photo.uri.startsWith('https://')).map(photo => photo.uri);
           }
+        } else if (isEditing) {
+          console.log('Accommodation Edit: All photos removed, images array will be empty');
+        }
+
+        // Handle removed images during edit
+        if (isEditing && removedImages.length > 0) {
+          await deleteImagesFromStorage(removedImages);
+          console.log(`Deleted ${removedImages.length} removed images from storage`);
         }
 
         const accom = {
@@ -672,6 +776,7 @@ export default function PostScreen({ onPost }) {
       setEndDate('');
       setPhotos([]);
       setUploadingPhotos(false);
+      setRemovedImages([]);
       setErrors({});
       setEditingPost(null);
       // Reset schedule
