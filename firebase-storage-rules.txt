@@ -1,0 +1,39 @@
+// Firebase Storage Security Rules for AmbaConnect
+// Copy and paste this into Firebase Console > Storage > Rules
+
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Allow read access to all users for public content
+    match /{allPaths=**} {
+      allow read: if true;
+    }
+    
+    // Allow authenticated users to upload to jobs folder
+    match /jobs/{fileName} {
+      allow write: if request.auth != null
+        && request.auth.uid != null
+        && fileName.matches('.*\\.(jpg|jpeg|png|gif|webp)$')
+        && resource.size < 5 * 1024 * 1024; // 5MB limit
+    }
+    
+    // Allow authenticated users to upload to accommodations folder
+    match /accommodations/{fileName} {
+      allow write: if request.auth != null
+        && request.auth.uid != null
+        && fileName.matches('.*\\.(jpg|jpeg|png|gif|webp)$')
+        && resource.size < 5 * 1024 * 1024; // 5MB limit
+    }
+    
+    // Allow users to delete their own uploads (optional)
+    match /jobs/{fileName} {
+      allow delete: if request.auth != null
+        && request.auth.uid != null;
+    }
+    
+    match /accommodations/{fileName} {
+      allow delete: if request.auth != null
+        && request.auth.uid != null;
+    }
+  }
+}

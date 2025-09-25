@@ -1,12 +1,15 @@
 import React, { useState } from 'react';
-import { ScrollView, TextInput, TouchableOpacity, Text, View, Alert, Modal, FlatList, Switch, ActivityIndicator } from 'react-native';
+import { ScrollView, TextInput, TouchableOpacity, Text, View, Alert, Modal, FlatList, Switch, ActivityIndicator, Image, StyleSheet } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import MapView, { Marker, UrlTile } from 'react-native-maps';
 import * as Location from 'expo-location';
+import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, shared } from './Theme';
-import { app, db } from '../firebaseConfig';
-import { serverTimestamp, doc, getDoc, setDoc } from 'firebase/firestore';
+import { app, db, storage } from '../firebaseConfig';
+import { serverTimestamp, doc, getDoc, setDoc, collection, query as fsQuery, where, getDocs, deleteDoc, updateDoc } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { validateField, sanitizeInput, ContentFilter } from '../utils/validation';
 import { LoadingSpinner } from './LoadingSpinner';
@@ -72,6 +75,19 @@ export default function PostScreen({ onPost }) {
   const [showStartPicker, setShowStartPicker] = useState(false);
   const [showEndPicker, setShowEndPicker] = useState(false);
 
+  // Photo upload fields
+  const [photos, setPhotos] = useState([]);
+  const [uploadingPhotos, setUploadingPhotos] = useState(false);
+
+  // My Posts modal
+  const [showMyPosts, setShowMyPosts] = useState(false);
+  const [myPosts, setMyPosts] = useState([]);
+  const [loadingMyPosts, setLoadingMyPosts] = useState(false);
+  const [editingPost, setEditingPost] = useState(null);
+
+  // Computed value to check if we're in editing mode
+  const isEditing = editingPost !== null;
+
   const validateInput = (field, value) => {
     const validation = validateField(field, value);
     setErrors(prev => ({
@@ -82,9 +98,294 @@ export default function PostScreen({ onPost }) {
   };
 
   const generateTags = (title, description) => {
-    const text = (title + ' ' + description).toLowerCase();
-    const words = text.split(/\s+/).filter(word => word.length > 2);
-    return [...new Set(words)].slice(0, 10);
+    // No tags needed for now
+    return [];
+  };
+
+  const pickImages = async () => {
+    if (photos.length >= 5) {
+      Alert.alert('Limit Reached', 'You can upload maximum 5 photos');
+      return;
+    }
+
+    Alert.alert(
+      'Select Photos',
+      'Choose how you want to add photos',
+      [
+        {
+          text: 'Camera',
+          onPress: async () => {
+            try {
+              // Request camera permissions first
+              const { status } = await ImagePicker.requestCameraPermissionsAsync();
+              if (status !== 'granted') {
+                Alert.alert('Permission Required', 'Camera permission is required to take photos');
+                return;
+              }
+
+              const result = await ImagePicker.launchCameraAsync({
+                mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                allowsEditing: true,
+                aspect: [4, 3],
+                quality: 0.8,
+              });
+
+              if (!result.canceled && result.assets && result.assets[0]) {
+                const remainingSlots = 5 - photos.length;
+                if (remainingSlots > 0) {
+                  setPhotos(prev => [...prev, result.assets[0]]);
+                }
+              }
+            } catch (error) {
+              Alert.alert('Error', 'Failed to take photo');
+            }
+          }
+        },
+        {
+          text: 'Photo Library',
+          onPress: async () => {
+            try {
+              const result = await ImagePicker.launchImageLibraryAsync({
+                mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                allowsMultipleSelection: true,
+                quality: 0.8,
+                aspect: [4, 3],
+              });
+
+              if (!result.canceled && result.assets) {
+                const remainingSlots = 5 - photos.length;
+                const newPhotos = result.assets.slice(0, remainingSlots);
+                setPhotos(prev => [...prev, ...newPhotos]);
+              }
+            } catch (error) {
+              Alert.alert('Error', 'Failed to pick images');
+            }
+          }
+        },
+        {
+          text: 'Cancel',
+          style: 'cancel'
+        }
+      ]
+    );
+  };
+
+  const removePhoto = (index) => {
+    setPhotos(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const uploadPhotosToStorage = async (listingId, listingType = 'accommodations') => {
+    if (photos.length === 0) return [];
+
+    setUploadingPhotos(true);
+    
+    try {
+      // Get user info for authentication context
+      const localUser = JSON.parse(await AsyncStorage.getItem('user') || '{}');
+      if (!localUser.id) {
+        throw new Error('User not authenticated. Please login again.');
+      }
+
+      console.log(`Starting upload for user: ${localUser.id}, type: ${listingType}`);
+      
+      const uploadPromises = photos.map(async (photo, index) => {
+        try {
+          // Check if photo is already uploaded (existing photo during edit)
+          if (photo.uri.startsWith('https://')) {
+            console.log(`Photo ${index} already uploaded: ${photo.uri}`);
+            return photo.uri;
+          }
+
+          console.log(`Uploading photo ${index + 1}/${photos.length}...`);
+          
+          const response = await fetch(photo.uri);
+          const blob = await response.blob();
+          
+          // Create filename with user ID and better structure
+          const timestamp = Date.now();
+          const fileName = `${localUser.id}_${listingId}_${index}_${timestamp}.jpg`;
+          
+          // Use appropriate folder based on listing type
+          const folderName = listingType === 'job' ? 'jobs' : 'accommodations';
+          const storageRef = ref(storage, `${folderName}/${fileName}`);
+          
+          console.log(`Uploading to: ${folderName}/${fileName}`);
+          
+          await uploadBytes(storageRef, blob);
+          const downloadURL = await getDownloadURL(storageRef);
+          
+          console.log(`Upload successful: ${downloadURL}`);
+          return downloadURL;
+        } catch (error) {
+          console.error(`Error uploading photo ${index}:`, error);
+          
+          // Provide more specific error messages
+          if (error.code === 'storage/unauthorized') {
+            throw new Error('Upload permission denied. Please check Firebase Storage rules.');
+          } else if (error.code === 'storage/canceled') {
+            throw new Error('Upload was canceled.');
+          } else if (error.code === 'storage/unknown') {
+            throw new Error('Unknown upload error. Please try again.');
+          }
+          
+          throw error;
+        }
+      });
+
+      const uploadedUrls = await Promise.all(uploadPromises);
+      const validUrls = uploadedUrls.filter(url => url !== null);
+      
+      console.log(`Successfully uploaded ${validUrls.length} out of ${photos.length} photos`);
+      return validUrls;
+      
+    } catch (error) {
+      console.error('Error in upload process:', error);
+      Alert.alert(
+        'Upload Error', 
+        `Failed to upload photos: ${error.message}\n\nPlease check your internet connection and Firebase configuration.`
+      );
+      return [];
+    } finally {
+      setUploadingPhotos(false);
+    }
+  };
+
+  const loadMyPosts = async () => {
+    setLoadingMyPosts(true);
+    try {
+      const localUser = JSON.parse(await AsyncStorage.getItem('user'));
+      if (!localUser || !localUser.id) {
+        Alert.alert('Login Required', 'Please login to view your posts');
+        setLoadingMyPosts(false);
+        return;
+      }
+
+      // Query jobs collection
+      const jobsQuery = fsQuery(collection(db, 'jobs'), where('createdById', '==', localUser.id));
+      const jobsSnapshot = await getDocs(jobsQuery);
+      const userJobs = jobsSnapshot.docs.map(doc => ({
+        id: doc.id,
+        kind: 'job',
+        ...doc.data()
+      }));
+
+      // Query accommodations collection
+      const accomQuery = fsQuery(collection(db, 'accommodations'), where('createdById', '==', localUser.id));
+      const accomSnapshot = await getDocs(accomQuery);
+      const userAccommodations = accomSnapshot.docs.map(doc => ({
+        id: doc.id,
+        kind: 'accommodation',
+        ...doc.data()
+      }));
+
+      const allPosts = [...userJobs, ...userAccommodations].sort((a, b) => {
+        const dateA = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.createdAt);
+        const dateB = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.createdAt);
+        return dateB - dateA; // Latest first
+      });
+
+      setMyPosts(allPosts);
+    } catch (error) {
+      Alert.alert('Error', 'Failed to load your posts');
+    }
+    setLoadingMyPosts(false);
+  };
+
+  const deletePost = async (post) => {
+    Alert.alert(
+      'Delete Post',
+      `Are you sure you want to delete "${post.title}"?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Delete', 
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const collection_name = post.kind === 'accommodation' ? 'accommodations' : 'jobs';
+              console.log('Deleting post:', post.id, 'from collection:', collection_name);
+              
+              await deleteDoc(doc(db, collection_name, post.id));
+              
+              // Remove from local state
+              setMyPosts(prev => prev.filter(p => p.id !== post.id));
+              
+              Alert.alert('Success', 'Post deleted successfully');
+            } catch (error) {
+              console.error('Delete post error:', error);
+              Alert.alert('Error', `Failed to delete post: ${error.message}`);
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const editPost = (post) => {
+    // Populate form with existing data
+    setPostKind(post.kind);
+    setTitle(post.title);
+    setDescription(post.description || '');
+    setContact(post.contact || '');
+    setCity(post.location?.split(' ')[0] || '');
+    
+    // Set location data (lat/lng) if available
+    if (post.lat && post.lng) {
+      setPickerMarker({
+        latitude: post.lat,
+        longitude: post.lng
+      });
+      setPickerCity(post.location?.split(' ')[0] || '');
+      // Calculate distance if user location is available
+      if (userLocation) {
+        try {
+          const km = haversineKm(userLocation.latitude, userLocation.longitude, post.lat, post.lng);
+          setPickerDistanceKm(km);
+        } catch (e) {
+          console.log('Error calculating distance:', e);
+        }
+      }
+    }
+    
+    if (post.kind === 'job') {
+      setType(post.type || 'Part-time');
+      setSalary(post.salary?.toString() || '');
+      setSalaryType(post.salaryType || 'hourly');
+    } else {
+      setAccomType(post.accomType || '1BHK');
+      setRent(post.rent?.toString() || '');
+      setAccomAvailability(post.availability || 'Sharing');
+    }
+    
+    // Set duration data if available
+    if (post.duration) {
+      setDurationEnabled(true);
+      setStartDate(post.duration.start || '');
+      setEndDate(post.duration.end || '');
+    } else {
+      setDurationEnabled(false);
+      setStartDate('');
+      setEndDate('');
+    }
+    
+    // Set existing images if available
+    if (post.images && post.images.length > 0) {
+      // Convert image URLs to the format expected by the photo picker
+      const existingPhotos = post.images.map((url, index) => ({
+        uri: url,
+        type: 'image',
+        fileName: `existing_image_${index}.jpg`
+      }));
+      setPhotos(existingPhotos);
+    } else {
+      setPhotos([]);
+    }
+    
+    setCurrency(post.currency || 'USD');
+    setEditingPost(post);
+    setShowMyPosts(false);
+    
+    Alert.alert('Edit Mode', 'Form loaded with existing data. Make changes and submit to update.');
   };
 
   const toggleDay = (d) => {
@@ -171,6 +472,29 @@ export default function PostScreen({ onPost }) {
         const sanitizedDescription = sanitizeInput(description);
         const sanitizedContact = sanitizeInput(contact);
 
+        // Create job ID for photo upload (use existing ID if editing)
+        const jobId = isEditing ? editingPost.id : `job_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        
+        // Upload photos if any (handle both new photos and existing ones during edit)
+        let imageUrls = isEditing ? (editingPost.images || []) : [];
+        if (photos.length > 0) {
+          try {
+            const newPhotos = photos.filter(photo => !photo.uri.startsWith('https://'));
+            if (newPhotos.length > 0) {
+              const newImageUrls = await uploadPhotosToStorage(jobId, 'job');
+              // Keep existing images and add new ones
+              const existingImages = photos.filter(photo => photo.uri.startsWith('https://')).map(photo => photo.uri);
+              imageUrls = [...existingImages, ...newImageUrls];
+            } else {
+              // All photos are existing ones
+              imageUrls = photos.map(photo => photo.uri);
+            }
+          } catch (error) {
+            console.error('Photo upload error:', error);
+            Alert.alert('Upload Error', 'Failed to upload some photos. Job will be posted without new images.');
+          }
+        }
+
         const job = {
           kind: 'job',
           title: sanitizedTitle,
@@ -185,7 +509,7 @@ export default function PostScreen({ onPost }) {
           lat: pickerMarker ? pickerMarker.latitude : (userLocation ? userLocation.latitude + (Math.random() - 0.5) * 0.02 : 37.78825),
           lng: pickerMarker ? pickerMarker.longitude : (userLocation ? userLocation.longitude + (Math.random() - 0.5) * 0.02 : -122.4324),
           createdAt: new Date().toISOString(),
-          images: [],
+          images: imageUrls,
           duration: durationEnabled ? { start: startDate || null, end: endDate || null } : null,
           tags: generateTags(sanitizedTitle, sanitizedDescription),
         };
@@ -211,11 +535,20 @@ export default function PostScreen({ onPost }) {
           payload.userPhone = localUser.phone || localUser.id;
           payload.createdById = localUser.id;
 
-          const docId = `${localUser.id}_${Date.now()}`;
-          await setDoc(doc(db, 'jobs', docId), payload);
-          
-          onPost && onPost({ ...job, id: docId });
-          Alert.alert('Posted', 'Job posted successfully');
+          if (isEditing) {
+            // Update existing job
+            await updateDoc(doc(db, 'jobs', editingPost.id), {
+              ...payload,
+              updatedAt: serverTimestamp()
+            });
+            Alert.alert('Success', `Job updated successfully${imageUrls.length > 0 ? ` with ${imageUrls.length} photo(s)` : ''}`);
+          } else {
+            // Create new job
+            const docId = `${localUser.id}_${Date.now()}`;
+            await setDoc(doc(db, 'jobs', docId), payload);
+            onPost && onPost({ ...job, id: docId });
+            Alert.alert('Success', `Job posted successfully${imageUrls.length > 0 ? ` with ${imageUrls.length} photo(s)` : ''}`);
+          }
         } catch (err) {
           console.error('Failed to write job to Firestore', err);
           Alert.alert('Error', 'Unable to save job to server.');
@@ -239,6 +572,29 @@ export default function PostScreen({ onPost }) {
         const sanitizedContact = sanitizeInput(contact);
         const sanitizedCity = sanitizeInput(city);
 
+        // Create accommodation ID for photo upload (use existing ID if editing)
+        const accomId = isEditing ? editingPost.id : `accom_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        
+        // Upload photos (handle both new photos and existing ones during edit)
+        let imageUrls = isEditing ? (editingPost.images || []) : [];
+        if (photos.length > 0) {
+          try {
+            const newPhotos = photos.filter(photo => !photo.uri.startsWith('https://'));
+            if (newPhotos.length > 0) {
+              const newImageUrls = await uploadPhotosToStorage(accomId, 'accommodation');
+              // Keep existing images and add new ones
+              const existingImages = photos.filter(photo => photo.uri.startsWith('https://')).map(photo => photo.uri);
+              imageUrls = [...existingImages, ...newImageUrls];
+            } else {
+              // All photos are existing ones
+              imageUrls = photos.map(photo => photo.uri);
+            }
+          } catch (error) {
+            console.error('Photo upload error:', error);
+            Alert.alert('Upload Error', 'Failed to upload some photos. Accommodation will be posted without new images.');
+          }
+        }
+
         const accom = {
           kind: 'accommodation',
           title: `${accomType} available in ${sanitizedCity}`,
@@ -252,7 +608,7 @@ export default function PostScreen({ onPost }) {
           lat: pickerMarker.latitude,
           lng: pickerMarker.longitude,
           createdAt: new Date().toISOString(),
-          images: [],
+          images: imageUrls,
           duration: durationEnabled ? { start: startDate || null, end: endDate || null } : null,
           tags: generateTags(accomType, sanitizedDescription),
         };
@@ -278,11 +634,20 @@ export default function PostScreen({ onPost }) {
           payload.userPhone = localUser.phone || localUser.id;
           payload.createdById = localUser.id;
 
-          const docId = `${localUser.id}_${Date.now()}`;
-          await setDoc(doc(db, 'accommodations', docId), payload);
-          
-          onPost && onPost({ ...accom, id: docId });
-          Alert.alert('Posted', 'Accommodation posted successfully');
+          if (isEditing) {
+            // Update existing accommodation
+            await updateDoc(doc(db, 'accommodations', editingPost.id), {
+              ...payload,
+              updatedAt: serverTimestamp()
+            });
+            Alert.alert('Success', `Accommodation updated successfully${imageUrls.length > 0 ? ` with ${imageUrls.length} photo(s)` : ''}`);
+          } else {
+            // Create new accommodation
+            const docId = `${localUser.id}_${Date.now()}`;
+            await setDoc(doc(db, 'accommodations', docId), payload);
+            onPost && onPost({ ...accom, id: docId });
+            Alert.alert('Success', `Accommodation posted successfully${imageUrls.length > 0 ? ` with ${imageUrls.length} photo(s)` : ''}`);
+          }
         } catch (err) {
           console.error('Failed to write accommodation to Firestore', err);
           Alert.alert('Error', 'Unable to save accommodation to server.');
@@ -305,7 +670,10 @@ export default function PostScreen({ onPost }) {
       setDurationEnabled(false);
       setStartDate('');
       setEndDate('');
+      setPhotos([]);
+      setUploadingPhotos(false);
       setErrors({});
+      setEditingPost(null);
       // Reset schedule
       const resetSchedule = {};
       days.forEach(d => { resetSchedule[d] = { enabled: false, start: '', end: '' }; });
@@ -325,6 +693,21 @@ export default function PostScreen({ onPost }) {
 
   return (
     <ScrollView contentContainerStyle={{ padding: 16 }}>
+      {/* Header with My Posts button */}
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <Text style={[shared.title, { fontSize: 24, color: Colors.primary }]}>
+          {isEditing ? 'Edit Post' : 'Create Post'}
+        </Text>
+        <TouchableOpacity 
+          onPress={() => {
+            setShowMyPosts(true);
+            loadMyPosts();
+          }}
+          style={[shared.secondaryButton, { paddingHorizontal: 12, paddingVertical: 8 }]}
+        >
+          <Text style={[shared.secondaryButtonText, { fontSize: 14 }]}>My Posts</Text>
+        </TouchableOpacity>
+      </View>
       {/* Post Type Selector */}
       <View style={{ flexDirection: 'row', marginBottom: 16 }}>
         <TouchableOpacity 
@@ -468,6 +851,58 @@ export default function PostScreen({ onPost }) {
             onChangeText={setCity} 
             style={[shared.input, shared.mb12]} 
           />
+
+          {/* Photo Upload Section for Jobs */}
+          <View style={shared.mb16}>
+            <Text style={shared.heading3}>Photos (Optional, Max 5)</Text>
+            <Text style={[shared.captionText, { color: Colors.muted, marginBottom: 8 }]}>
+              Add photos of the workplace, environment, or job-related images
+            </Text>
+            <TouchableOpacity 
+              onPress={pickImages}
+              style={[shared.secondaryButton, shared.mt8, { flexDirection: 'row', alignItems: 'center' }]}
+              disabled={photos.length >= 5}
+            >
+              <Ionicons name="camera" size={16} color={photos.length >= 5 ? Colors.muted : Colors.primary} style={{ marginRight: 6 }} />
+              <Text style={[shared.secondaryButtonText, { color: photos.length >= 5 ? Colors.muted : Colors.primary }]}>
+                {photos.length === 0 ? 'Add Photos' : `${photos.length}/5 Photos`}
+              </Text>
+            </TouchableOpacity>
+            
+            {photos.length > 0 && (
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 12 }}>
+                {photos.map((photo, index) => (
+                  <View key={index} style={{ marginRight: 8, marginBottom: 8, position: 'relative' }}>
+                    <Image 
+                      source={{ uri: photo.uri }} 
+                      style={{ 
+                        width: 80, 
+                        height: 80, 
+                        borderRadius: 8, 
+                        backgroundColor: Colors.border 
+                      }} 
+                    />
+                    <TouchableOpacity 
+                      onPress={() => removePhoto(index)}
+                      style={{
+                        position: 'absolute',
+                        top: -5,
+                        right: -5,
+                        backgroundColor: '#FF6B6B',
+                        borderRadius: 12,
+                        width: 24,
+                        height: 24,
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                      }}
+                    >
+                      <Ionicons name="close" size={14} color="white" />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
         </>
       )}
 
@@ -566,6 +1001,55 @@ export default function PostScreen({ onPost }) {
             onChangeText={setStreet} 
             style={[shared.input, shared.mb12]} 
           />
+
+          {/* Photo Upload Section */}
+          <View style={shared.mb16}>
+            <Text style={shared.heading3}>Photos (Max 5)</Text>
+            <TouchableOpacity 
+              onPress={pickImages}
+              style={[shared.secondaryButton, shared.mt8, { flexDirection: 'row', alignItems: 'center' }]}
+              disabled={photos.length >= 5}
+            >
+              <Ionicons name="camera" size={16} color={photos.length >= 5 ? Colors.muted : Colors.primary} style={{ marginRight: 6 }} />
+              <Text style={[shared.secondaryButtonText, { color: photos.length >= 5 ? Colors.muted : Colors.primary }]}>
+                {photos.length === 0 ? 'Add Photos' : `${photos.length}/5 Photos`}
+              </Text>
+            </TouchableOpacity>
+            
+            {photos.length > 0 && (
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 12 }}>
+                {photos.map((photo, index) => (
+                  <View key={index} style={{ marginRight: 8, marginBottom: 8, position: 'relative' }}>
+                    <Image 
+                      source={{ uri: photo.uri }} 
+                      style={{ 
+                        width: 80, 
+                        height: 80, 
+                        borderRadius: 8, 
+                        backgroundColor: Colors.border 
+                      }} 
+                    />
+                    <TouchableOpacity 
+                      onPress={() => removePhoto(index)}
+                      style={{
+                        position: 'absolute',
+                        top: -5,
+                        right: -5,
+                        backgroundColor: '#FF6B6B',
+                        borderRadius: 12,
+                        width: 24,
+                        height: 24,
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                      }}
+                    >
+                      <Ionicons name="close" size={14} color="white" />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
         </>
       )}
 
@@ -687,18 +1171,41 @@ export default function PostScreen({ onPost }) {
       <TouchableOpacity 
         style={[shared.primaryButton, shared.mt16, { flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }]} 
         onPress={submit}
-        disabled={loading}
+        disabled={loading || uploadingPhotos}
       >
-        <Ionicons 
-          name={postKind === 'job' ? "briefcase" : "home"} 
-          size={16} 
-          color={Colors.card}
-          style={{ marginRight: 8 }}
-        />
-        <Text style={shared.primaryButtonText}>
-          {postKind === 'job' ? 'Post Job' : 'Post Housing'}
-        </Text>
+        {(loading || uploadingPhotos) ? (
+          <>
+            <ActivityIndicator size="small" color={Colors.card} style={{ marginRight: 8 }} />
+            <Text style={shared.primaryButtonText}>
+              {uploadingPhotos ? 'Uploading Photos...' : 'Posting...'}
+            </Text>
+          </>
+        ) : (
+          <>
+            <Ionicons 
+              name={postKind === 'job' ? "briefcase" : "home"} 
+              size={16} 
+              color={Colors.card}
+              style={{ marginRight: 8 }}
+            />
+            <Text style={shared.primaryButtonText}>
+              {isEditing 
+                ? `Update ${postKind === 'job' ? 'Job' : 'Housing'}`
+                : `Post ${postKind === 'job' ? 'Job' : 'Housing'}`
+              }
+            </Text>
+          </>
+        )}
       </TouchableOpacity>
+
+      {/* Photo Upload Progress */}
+      {uploadingPhotos && (
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 12 }}>
+          <Text style={[shared.captionText, { color: Colors.primary }]}>
+            Uploading {photos.length} photo{photos.length !== 1 ? 's' : ''} to Google Cloud Storage...
+          </Text>
+        </View>
+      )}
 
       {/* Map Picker Modal */}
       <Modal visible={showMapPicker} animationType="slide">
@@ -833,6 +1340,313 @@ export default function PostScreen({ onPost }) {
           }}
         />
       )}
+
+      {/* My Posts Modal */}
+      <Modal visible={showMyPosts} animationType="slide" presentationStyle="pageSheet">
+        <SafeAreaView style={{ flex: 1, backgroundColor: Colors.bg }}>
+          <View style={styles.modalHeader}>
+            <TouchableOpacity 
+              onPress={() => setShowMyPosts(false)}
+              style={styles.backButton}
+            >
+              <Ionicons name="arrow-back" size={24} color={Colors.text} />
+            </TouchableOpacity>
+            <Text style={styles.modalTitle}>My Posts</Text>
+            <View style={styles.headerSpacer} />
+          </View>
+          
+          {loadingMyPosts ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color={Colors.primary} />
+              <Text style={styles.loadingText}>Loading your posts...</Text>
+            </View>
+          ) : (
+            <FlatList
+              data={myPosts}
+              keyExtractor={(item) => item.id}
+              renderItem={({ item }) => (
+                <View style={styles.postCard}>
+                  <View style={styles.postHeader}>
+                    <View style={styles.postTypeIndicator}>
+                      <Ionicons 
+                        name={item.kind === 'job' ? 'briefcase' : 'home'} 
+                        size={16} 
+                        color={Colors.primary} 
+                      />
+                      <Text style={styles.postTypeText}>
+                        {item.kind === 'job' ? 'Job' : 'Accommodation'}
+                      </Text>
+                    </View>
+                    <Text style={styles.postDate}>
+                      {item.createdAt ? new Date(item.createdAt.toDate ? item.createdAt.toDate() : item.createdAt).toLocaleDateString() : ''}
+                    </Text>
+                  </View>
+                  
+                  <Text style={styles.postTitle} numberOfLines={2}>{item.title}</Text>
+                  
+                  {item.description && (
+                    <Text style={styles.postDescription} numberOfLines={3}>
+                      {item.description}
+                    </Text>
+                  )}
+                  
+                  {/* Post Details */}
+                  <View style={styles.postDetails}>
+                    {item.kind === 'job' ? (
+                      <View style={styles.detailRow}>
+                        <Ionicons name="cash-outline" size={14} color={Colors.muted} />
+                        <Text style={styles.detailText}>
+                          {item.salary} {item.currency || 'USD'}
+                          {item.salaryType === 'hourly' ? '/hr' : item.salaryType === 'daily' ? '/day' : '/week'}
+                        </Text>
+                      </View>
+                    ) : (
+                      <View style={styles.detailRow}>
+                        <Ionicons name="cash-outline" size={14} color={Colors.muted} />
+                        <Text style={styles.detailText}>
+                          {item.rent} {item.currency || 'USD'}/month
+                        </Text>
+                      </View>
+                    )}
+                    
+                    {item.location && (
+                      <View style={styles.detailRow}>
+                        <Ionicons name="location-outline" size={14} color={Colors.muted} />
+                        <Text style={styles.detailText} numberOfLines={1}>
+                          {item.location}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                  
+                  <View style={styles.postActions}>
+                    <TouchableOpacity
+                      style={styles.editButton}
+                      onPress={() => {
+                        editPost(item);
+                        setShowMyPosts(false);
+                      }}
+                    >
+                      <Ionicons name="create-outline" size={16} color="#fff" />
+                      <Text style={styles.editButtonText}>Edit</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.deleteButton}
+                      onPress={() => deletePost(item)}
+                    >
+                      <Ionicons name="trash-outline" size={16} color="#fff" />
+                      <Text style={styles.deleteButtonText}>Delete</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+              ListEmptyComponent={
+                <View style={styles.emptyContainer}>
+                  <Ionicons name="document-outline" size={64} color={Colors.muted} />
+                  <Text style={styles.emptyTitle}>No posts yet</Text>
+                  <Text style={styles.emptySubtitle}>
+                    Create your first job or accommodation post to see it here
+                  </Text>
+                  <TouchableOpacity 
+                    style={styles.createButton}
+                    onPress={() => setShowMyPosts(false)}
+                  >
+                    <Text style={styles.createButtonText}>Create Post</Text>
+                  </TouchableOpacity>
+                </View>
+              }
+              contentContainerStyle={{ padding: 16 }}
+              showsVerticalScrollIndicator={false}
+            />
+          )}
+        </SafeAreaView>
+      </Modal>
     </ScrollView>
   );
 }
+
+const styles = StyleSheet.create({
+  // Modal styles
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+    backgroundColor: Colors.card,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: Colors.bg,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: Colors.text,
+  },
+  headerSpacer: {
+    width: 40,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: Colors.bg,
+  },
+  loadingText: {
+    marginTop: 12,
+    color: Colors.muted,
+    fontSize: 16,
+  },
+  
+  // Post card styles
+  postCard: {
+    backgroundColor: Colors.card,
+    marginBottom: 16,
+    borderRadius: 16,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  postHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  postTypeIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.primary + '15',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  postTypeText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: Colors.primary,
+    marginLeft: 4,
+  },
+  postDate: {
+    fontSize: 12,
+    color: Colors.muted,
+  },
+  postTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: Colors.text,
+    marginBottom: 8,
+    lineHeight: 24,
+  },
+  postDescription: {
+    fontSize: 14,
+    color: Colors.muted,
+    lineHeight: 20,
+    marginBottom: 12,
+  },
+  
+  // Post details
+  postDetails: {
+    marginBottom: 16,
+  },
+  detailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  detailText: {
+    fontSize: 14,
+    color: Colors.text,
+    marginLeft: 8,
+    flex: 1,
+  },
+  
+  // Action buttons
+  postActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 12,
+  },
+  editButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.primary,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+    shadowColor: Colors.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  editButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+    marginLeft: 6,
+  },
+  deleteButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FF3B30',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+    shadowColor: '#FF3B30',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  deleteButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+    marginLeft: 6,
+  },
+  
+  // Empty state
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 80,
+  },
+  emptyTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: Colors.text,
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  emptySubtitle: {
+    fontSize: 14,
+    color: Colors.muted,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 24,
+    paddingHorizontal: 40,
+  },
+  createButton: {
+    backgroundColor: Colors.primary,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 24,
+  },
+  createButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+});

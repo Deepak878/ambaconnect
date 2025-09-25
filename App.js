@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { View, Text, TouchableOpacity, Alert, Modal } from 'react-native';
+import { View, Text, TouchableOpacity, Alert, Modal, ActivityIndicator } from 'react-native';
 import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import AuthScreen from './components/AuthScreen';
@@ -10,19 +10,18 @@ import PostScreen from './components/PostScreen';
 import JobDetailModal from './components/JobDetailModal';
 import MapScreen from './components/MapScreen';
 import ErrorBoundary from './components/ErrorBoundary';
-import initialJobs from './data/jobs';
 import { Colors, shared } from './components/Theme';
 import Header from './components/Header';
 import * as Location from 'expo-location';
 import ProfileModal from './components/ProfileModal';
 import { db } from './firebaseConfig';
-import { doc, setDoc, deleteDoc, serverTimestamp, collection, query as fsQuery, where, onSnapshot, getDoc, getDocs, addDoc } from 'firebase/firestore';
+import { doc, setDoc, deleteDoc, serverTimestamp, collection, query as fsQuery, where, onSnapshot, getDoc } from 'firebase/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function App() {
   const [user, setUser] = useState(null);
   const [profileOpen, setProfileOpen] = useState(false);
-  const [jobs, setJobs] = useState(initialJobs);
+  const [jobs, setJobs] = useState([]);
   const [savedIds, setSavedIds] = useState([]);
   const [activeTab, setActiveTab] = useState('Jobs');
   const [detailJob, setDetailJob] = useState(null);
@@ -30,6 +29,8 @@ export default function App() {
   const [authVisible, setAuthVisible] = useState(false);
   const [pendingAction, setPendingAction] = useState(null);
   const [userLocation, setUserLocation] = useState(null);
+  const [isConnecting, setIsConnecting] = useState(true);
+  const [connectionError, setConnectionError] = useState(null);
 
   const handleLogin = async (u) => {
     // persistence removed: accept incoming user object and store in memory only
@@ -163,10 +164,66 @@ export default function App() {
   };
   const savedJobs = jobs.filter(j => savedIds.includes(String(j.id)));
 
-  useEffect(() => {
-    let unsubSaved = null;
+  // Firestore connection setup function
+  const setupFirestoreListeners = () => {
     let unsubJobs = null;
     let unsubAccommodations = null;
+    
+    try {
+      setIsConnecting(true);
+      setConnectionError(null);
+      
+      // Load jobs from Firestore 'jobs' collection
+      const jobsQuery = fsQuery(collection(db, 'jobs'));
+      unsubJobs = onSnapshot(jobsQuery, (snapshot) => {
+        const firestoreJobs = snapshot.docs.map(doc => ({
+          id: doc.id, // Use Firestore document ID
+          kind: 'job',
+          ...doc.data()
+        }));
+        
+        // Load accommodations from Firestore 'accommodations' collection
+        const accommodationsQuery = fsQuery(collection(db, 'accommodations'));
+        unsubAccommodations = onSnapshot(accommodationsQuery, (accomSnapshot) => {
+          const firestoreAccommodations = accomSnapshot.docs.map(doc => ({
+            id: doc.id, // Use Firestore document ID
+            kind: 'accommodation',
+            ...doc.data()
+          }));
+          
+          // Combine both jobs and accommodations
+          const allJobs = [...firestoreJobs, ...firestoreAccommodations];
+          setJobs(allJobs);
+          setIsConnecting(false);
+          setConnectionError(null);
+        }, (error) => {
+          console.error('Accommodations listener error:', error);
+          setConnectionError('Failed to load accommodations');
+          // Keep existing jobs on accommodation error, only update jobs part
+          setJobs(prev => prev.filter(j => j.kind === 'job').concat(firestoreJobs));
+          setIsConnecting(false);
+        });
+      }, (error) => {
+        console.error('Jobs listener error:', error);
+        setIsConnecting(false);
+        setConnectionError('Failed to connect to Firestore. Retrying...');
+        // Retry after 5 seconds
+        setTimeout(setupFirestoreListeners, 5000);
+      });
+    } catch (error) {
+      console.error('Failed to setup Firestore listeners:', error);
+      setIsConnecting(false);
+      setConnectionError('Connection failed. Retrying...');
+      // Retry after 10 seconds
+      setTimeout(setupFirestoreListeners, 10000);
+    }
+
+    return { unsubJobs, unsubAccommodations };
+  };
+
+  useEffect(() => {
+    let unsubSaved = null;
+    let unsubscriptions = null;
     
     // load persisted user from AsyncStorage for app persistence
     (async () => {
@@ -179,43 +236,43 @@ export default function App() {
       } catch (e) { console.warn('Failed to load persisted user', e); }
     })();
 
-    // Load jobs from Firestore 'jobs' collection
-    const jobsQuery = fsQuery(collection(db, 'jobs'));
-    unsubJobs = onSnapshot(jobsQuery, (snapshot) => {
-      const firestoreJobs = snapshot.docs.map(doc => ({
-        id: doc.id, // Use Firestore document ID
-        kind: 'job',
-        ...doc.data()
-      }));
-      
-      // Load accommodations from Firestore 'accommodations' collection
-      const accommodationsQuery = fsQuery(collection(db, 'accommodations'));
-      unsubAccommodations = onSnapshot(accommodationsQuery, (accomSnapshot) => {
-        const firestoreAccommodations = accomSnapshot.docs.map(doc => ({
-          id: doc.id, // Use Firestore document ID
-          kind: 'accommodation',
-          ...doc.data()
-        }));
-        
-        // Combine both jobs and accommodations, with fallback to initial data if empty
-        const allJobs = [...firestoreJobs, ...firestoreAccommodations];
-        if (allJobs.length === 0) {
-          setJobs(initialJobs);
-        } else {
-          setJobs(allJobs);
+    // Setup Firestore listeners
+    unsubscriptions = setupFirestoreListeners();
+    
+    let locationSub = null;
+    (async () => {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status === 'granted') {
+          const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest });
+          setUserLocation({ latitude: loc.coords.latitude, longitude: loc.coords.longitude });
+          // start watching for changes
+          locationSub = await Location.watchPositionAsync({ accuracy: Location.Accuracy.Highest, distanceInterval: 10 }, (l) => {
+            if (l && l.coords) setUserLocation({ latitude: l.coords.latitude, longitude: l.coords.longitude });
+          });
         }
-      }, (error) => {
-        // Fallback to initial data on error
-        setJobs(initialJobs);
-      });
-    }, (error) => {
-      // Fallback to initial data on error
-      setJobs(initialJobs);
-    });
+      } catch (e) {
+        // ignore location errors
+      }
+    })();
+    
+    return () => { 
+      if (locationSub && locationSub.remove) locationSub.remove(); 
+      if (unsubscriptions) {
+        if (unsubscriptions.unsubJobs) unsubscriptions.unsubJobs();
+        if (unsubscriptions.unsubAccommodations) unsubscriptions.unsubAccommodations();
+      }
+    };
+  }, []);
+
+  // Separate useEffect for saved jobs that depends on user state
+  useEffect(() => {
+    let unsubSaved = null;
+    
     if (user && user.id) {
       const userPhone = user.phone ? ('' + user.phone).replace(/[^0-9]/g, '') : user.id;
       
-      // Query ALL saved documents (remove user filter for debugging)
+      // Query ALL saved documents
       const q = fsQuery(collection(db, 'saved'));
       unsubSaved = onSnapshot(q, snap => {
         // Try to extract jobIds from document data first, then fallback to document ID
@@ -244,77 +301,21 @@ export default function App() {
           return null;
         }).filter(Boolean);
         
+        console.log('Loaded saved job IDs:', ids); // Debug log
         setSavedIds(ids);
+      }, error => {
+        console.error('Error listening to saved jobs:', error);
+        setSavedIds([]);
       });
     } else {
+      // If no user, clear saved jobs
       setSavedIds([]);
     }
-    let locationSub = null;
-    (async () => {
-      try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status === 'granted') {
-          const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest });
-          setUserLocation({ latitude: loc.coords.latitude, longitude: loc.coords.longitude });
-          // start watching for changes
-          locationSub = await Location.watchPositionAsync({ accuracy: Location.Accuracy.Highest, distanceInterval: 10 }, (l) => {
-            if (l && l.coords) setUserLocation({ latitude: l.coords.latitude, longitude: l.coords.longitude });
-          });
-        }
-      } catch (e) {
-        // ignore location errors
-      }
-    })();
-    // Optional: Seed initial jobs into Firestore if collections are empty
-    // This will create jobs with real Firestore document IDs
-    (async () => {
-      try {
-        const seeded = await AsyncStorage.getItem('seeded_firestore');
-        if (!seeded) {
-          // Check if jobs collection is empty
-          const jobsSnapshot = await getDocs(collection(db, 'jobs'));
-          const accommodationsSnapshot = await getDocs(collection(db, 'accommodations'));
-          
-          if (jobsSnapshot.empty && accommodationsSnapshot.empty) {
-            // Seed jobs
-            const jobsToSeed = initialJobs.filter(j => j.kind === 'job' || !j.kind);
-            for (const job of jobsToSeed) {
-              const { id, ...jobData } = job; // Remove the old ID
-              await addDoc(collection(db, 'jobs'), {
-                ...jobData,
-                kind: 'job',
-                createdAt: serverTimestamp(),
-                owner: null,
-              });
-            }
-            
-            // Seed accommodations
-            const accommodationsToSeed = initialJobs.filter(j => j.kind === 'accommodation');
-            for (const accommodation of accommodationsToSeed) {
-              const { id, ...accomData } = accommodation; // Remove the old ID
-              await addDoc(collection(db, 'accommodations'), {
-                ...accomData,
-                kind: 'accommodation',
-                createdAt: serverTimestamp(),
-                owner: null,
-              });
-            }
-            
-            await AsyncStorage.setItem('seeded_firestore', 'true');
-          }
-        }
-      } catch (e) {
-        // Seeding error ignored
-      }
-    })();
-    // persistence removed: no Firestore listeners or AsyncStorage read on startup
-    return () => { 
-      if (locationSub && locationSub.remove) locationSub.remove(); 
-      if (unsubSaved) unsubSaved(); 
-      if (unsubJobs) unsubJobs();
-      if (unsubAccommodations) unsubAccommodations();
+    
+    return () => {
+      if (unsubSaved) unsubSaved();
     };
-  }, []);
+  }, [user]); // This useEffect depends on user state
 
   // Do not force auth on startup. Show AuthScreen modal when `authVisible` true.
 
@@ -328,6 +329,41 @@ export default function App() {
             user={user}
             onBack={detailJob ? (() => setDetailJob(null)) : (activeTab !== 'Jobs' ? (() => setActiveTab('Jobs')) : null)}
           />
+
+          {/* Connection Status Indicator */}
+          {(isConnecting || connectionError) && (
+            <View style={{ 
+              backgroundColor: connectionError ? '#FFE6E6' : '#E6F3FF', 
+              padding: 8, 
+              flexDirection: 'row', 
+              alignItems: 'center', 
+              justifyContent: 'center',
+              borderBottomWidth: 1,
+              borderBottomColor: Colors.border
+            }}>
+              {isConnecting && <ActivityIndicator size="small" color="#007AFF" style={{ marginRight: 8 }} />}
+              <Text style={{ 
+                color: connectionError ? '#D32F2F' : '#1976D2', 
+                fontSize: 12, 
+                textAlign: 'center',
+                flex: 1
+              }}>
+                {isConnecting ? 'Connecting to server...' : connectionError}
+              </Text>
+              {connectionError && !isConnecting && (
+                <TouchableOpacity 
+                  onPress={() => {
+                    setConnectionError(null);
+                    const newUnsubs = setupFirestoreListeners();
+                    // Update the unsubscriptions reference if needed
+                  }}
+                  style={{ marginLeft: 8, paddingHorizontal: 8, paddingVertical: 2, backgroundColor: '#1976D2', borderRadius: 4 }}
+                >
+                  <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>Retry</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
 
           <View style={{ flex: 1, padding: 12 }}>
             {activeTab === 'Jobs' && <JobsScreen jobs={jobs} onOpenJob={openJob} onSaveJob={saveJob} savedIds={savedIds} userLocation={userLocation} />}

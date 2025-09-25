@@ -1,6 +1,7 @@
 // Firebase initialization (web/Expo compatible)
 import { initializeApp } from 'firebase/app';
 import { getFirestore } from 'firebase/firestore';
+import { getStorage } from 'firebase/storage';
 // Auth not used client-side anymore; omit importing auth modules to avoid runtime issues
 
 const firebaseConfig = {
@@ -15,8 +16,31 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
+const storage = getStorage(app);
+
+// Configure Firestore settings for better connectivity
+import { connectFirestoreEmulator, enableNetwork, disableNetwork } from 'firebase/firestore';
+
+// Test Firestore connectivity
+export const testFirestoreConnection = async () => {
+  try {
+    // Try to enable network first
+    await enableNetwork(db);
+    return { success: true, message: 'Connected to Firestore' };
+  } catch (error) {
+    console.error('Firestore connection test failed:', error);
+    return { success: false, message: error.message };
+  }
+};
+
+// Enable network (useful for offline/online scenarios)
+try {
+  enableNetwork(db);
+} catch (error) {
+  console.log('Network enable error (can be ignored):', error);
+}
 
 // Initialize auth differently depending on environment.
 // Avoid top-level import of 'firebase/auth/react-native' so the module doesn't
 // cause bundling errors in web environments.
-export { app, db };
+export { app, db, storage };

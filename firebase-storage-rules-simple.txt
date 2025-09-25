@@ -1,0 +1,12 @@
+// Simpler Firebase Storage Rules (for development)
+// Copy and paste this into Firebase Console > Storage > Rules
+
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Allow read/write access to all users (development only)
+    match /{allPaths=**} {
+      allow read, write: if true;
+    }
+  }
+}

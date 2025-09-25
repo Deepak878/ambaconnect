@@ -10,6 +10,7 @@ import { collection, query as fsQuery, orderBy, onSnapshot } from 'firebase/fire
 
 export default function MapScreen({ jobs: propJobs = [], accommodations: propAccom = [], userLocation = null, onOpenJob = () => {}, onSave = null, savedIds = [] }) {
   const mapRef = useRef(null);
+  const listRef = useRef(null);
   const [mode, setMode] = useState('all'); // 'all' | 'jobs' | 'accommodations'
   const [jobFilter, setJobFilter] = useState('all'); // 'all' | 'part' | 'full'
   const [accomFilter, setAccomFilter] = useState('all'); // 'all' | 'owned' | 'shared'
@@ -90,7 +91,21 @@ export default function MapScreen({ jobs: propJobs = [], accommodations: propAcc
 
     const sorted = (userLocation) ? withDist.sort((a,b) => (a._distance || 1e9) - (b._distance || 1e9)) : withDist;
     setResults(sorted);
-    if (sorted.length) setSelected(sorted[0]);
+    
+    // Maintain selection if the selected item is still in results
+    if (selected) {
+      const stillExists = sorted.find(item => 
+        item.id === selected.id && (item._type || item.kind) === (selected._type || selected.kind)
+      );
+      if (stillExists) {
+        setSelected(stillExists);
+      } else {
+        // If selected item no longer exists, select first item
+        setSelected(sorted.length ? sorted[0] : null);
+      }
+    } else if (sorted.length) {
+      setSelected(sorted[0]);
+    }
   }
 
   function haversine(lat1, lon1, lat2, lon2) {
@@ -115,6 +130,33 @@ export default function MapScreen({ jobs: propJobs = [], accommodations: propAcc
       longitudeDelta: 0.05,
     }, 400);
     setSelected(item);
+  }
+
+  function scrollToItem(item) {
+    if (!item || !listRef.current || !results.length) return;
+    
+    const index = results.findIndex(r => r.id === item.id && (r._type || r.kind) === (item._type || item.kind));
+    if (index !== -1) {
+      listRef.current.scrollToIndex({ 
+        index, 
+        animated: true,
+        viewPosition: 0.5 // Center the item in the view
+      });
+    }
+  }
+
+  function onMarkerPress(item) {
+    setSelected(item);
+    scrollToItem(item);
+  }
+
+  function onCardPress(item) {
+    setSelected(item);
+    centerOn(item);
+  }
+
+  function onCardDoublePress(item) {
+    onOpenJob(item);
   }
 
   if (loading) return (
@@ -249,11 +291,12 @@ export default function MapScreen({ jobs: propJobs = [], accommodations: propAcc
             <Marker 
               key={uniqueKey} 
               coordinate={{ latitude: lat, longitude: lng }} 
-              onPress={() => { centerOn(r); }}
+              onPress={() => { onMarkerPress(r); }}
             >
               <View style={[
                 styles.customMarker, 
-                { backgroundColor: isAccommodation ? Colors.secondary || '#FF6B6B' : Colors.primary }
+                { backgroundColor: isAccommodation ? Colors.secondary || '#FF6B6B' : Colors.primary },
+                selected && selected.id === r.id && (selected._type || selected.kind) === (r._type || r.kind) && styles.selectedMarker
               ]}>
                 <Ionicons 
                   name={isAccommodation ? 'home' : 'briefcase'} 
@@ -299,23 +342,40 @@ export default function MapScreen({ jobs: propJobs = [], accommodations: propAcc
 
       <View style={styles.resultsContainer}>
         <View style={styles.resultsHeader}>
-          <Text style={styles.resultsTitle}>
-            {results.length} {mode === 'jobs' ? 'jobs' : mode === 'accommodations' ? 'accommodations' : 'listings'} found
-          </Text>
+          <View style={styles.resultsHeaderContent}>
+            <Text style={styles.resultsTitle}>
+              {results.length} {mode === 'jobs' ? 'jobs' : mode === 'accommodations' ? 'accommodations' : 'listings'} found
+            </Text>
+            <Text style={styles.resultsSubtitle}>
+              Tap card to center map • Tap ⓘ for details
+            </Text>
+          </View>
         </View>
         <FlatList
+          ref={listRef}
           data={results}
           horizontal
           keyExtractor={(item) => `${item._type || item.kind || 'item'}-${item.id}`}
           showsHorizontalScrollIndicator={false}
+          onScrollToIndexFailed={(info) => {
+            // Handle scroll failure gracefully
+            const wait = new Promise(resolve => setTimeout(resolve, 500));
+            wait.then(() => {
+              listRef.current?.scrollToIndex({ index: info.index, animated: true });
+            });
+          }}
           renderItem={({ item }) => {
             const isAccommodation = item.kind === 'accommodation' || item._type === 'accommodation';
             const isSaved = savedIds && savedIds.includes(item.id);
             
             return (
               <TouchableOpacity 
-                onPress={() => onOpenJob(item)} 
-                style={[styles.resultCard, selected && selected.id === item.id && styles.resultActive]}
+                onPress={() => onCardPress(item)}
+                onLongPress={() => onCardDoublePress(item)}
+                style={[
+                  styles.resultCard, 
+                  selected && selected.id === item.id && (selected._type || selected.kind) === (item._type || item.kind) && styles.resultActive
+                ]}
               >
                 <View style={styles.resultHeader}>
                   <View style={[styles.resultTypeIcon, { 
@@ -339,6 +399,16 @@ export default function MapScreen({ jobs: propJobs = [], accommodations: propAcc
                       />
                     </TouchableOpacity>
                   )}
+                  <TouchableOpacity 
+                    onPress={() => onCardDoublePress(item)} 
+                    style={styles.resultDetailBtn}
+                  >
+                    <Ionicons 
+                      name="information-circle-outline" 
+                      size={14} 
+                      color={Colors.primary} 
+                    />
+                  </TouchableOpacity>
                 </View>
                 
                 <Text style={styles.resultTitle} numberOfLines={2}>
@@ -459,6 +529,17 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 5,
   },
+  selectedMarker: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 3,
+    borderColor: Colors.card,
+    shadowOpacity: 0.35,
+    shadowRadius: 6,
+    elevation: 8,
+    transform: [{ scale: 1.1 }],
+  },
   calloutContainer: {
     maxWidth: 240,
     minWidth: 200,
@@ -510,10 +591,18 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
+  resultsHeaderContent: {
+    flexDirection: 'column',
+  },
   resultsTitle: {
     fontSize: 14,
     fontWeight: '600',
     color: Colors.text,
+  },
+  resultsSubtitle: {
+    fontSize: 11,
+    color: Colors.muted,
+    marginTop: 2,
   },
   resultCard: { 
     backgroundColor: Colors.card, 
@@ -556,6 +645,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: Colors.bg,
+  },
+  resultDetailBtn: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: Colors.primary + '20',
+    marginLeft: 4,
   },
   resultTitle: { 
     fontWeight: '600',
