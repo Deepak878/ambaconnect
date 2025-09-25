@@ -186,7 +186,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, shared } from './Theme';
-// Firestore usage for users collection
+import { validateField, rateLimiter, sanitizeInput } from '../utils/validation';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { app, db } from '../firebaseConfig';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
@@ -196,82 +196,209 @@ export default function AuthScreen({ onLogin, onClose }) {
   const [phone, setPhone] = useState('');
   const [name, setName] = useState('');
   const [dob, setDob] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [errors, setErrors] = useState({});
   const inputAccessoryViewID = 'phoneAccessory';
 
-  const handleSubmit = async () => {
-    const normalized = phone.replace(/[^0-9]/g, '');
-    console.log('Auth submit:', { phone: normalized, dob });
+  const validateInput = (field, value) => {
+    const validation = validateField(field, value);
+    setErrors(prev => ({
+      ...prev,
+      [field]: validation.isValid ? '' : validation.message
+    }));
+    return validation;
+  };
 
-    if (normalized.length < 7) {
-      Alert.alert('Invalid phone', 'Please enter a valid phone number');
+  const handleSubmit = async () => {
+    setLoading(true);
+    setErrors({});
+
+    // Rate limiting check
+    if (!rateLimiter.canMakeRequest('auth_attempt', 5, 300000)) { // 5 attempts per 5 minutes
+      const remainingTime = Math.ceil(rateLimiter.getRemainingTime('auth_attempt', 300000) / 1000);
+      Alert.alert('Too Many Attempts', `Please wait ${remainingTime} seconds before trying again.`);
+      setLoading(false);
       return;
     }
 
+    // Validate inputs
+    const phoneValidation = validateField('phone', phone);
+    const nameValidation = isRegister ? validateField('name', name) : { isValid: true };
+
+    if (!phoneValidation.isValid) {
+      setErrors(prev => ({ ...prev, phone: phoneValidation.message }));
+      setLoading(false);
+      return;
+    }
+
+    if (isRegister && !nameValidation.isValid) {
+      setErrors(prev => ({ ...prev, name: nameValidation.message }));
+      setLoading(false);
+      return;
+    }
+
+    const sanitizedPhone = sanitizeInput(phoneValidation.sanitizedValue);
+    const sanitizedName = isRegister ? sanitizeInput(nameValidation.sanitizedValue) : '';
+    const sanitizedDob = sanitizeInput(dob);
+
     try {
-      const id = normalized;
+      const id = sanitizedPhone;
+      
       if (isRegister) {
         // Register user in Firestore
         try {
           const userRef = doc(db, 'users', id);
           const existing = await getDoc(userRef);
-          if (existing && existing.exists && existing.exists()) {
+          
+          if (existing && existing.exists()) {
             Alert.alert('Already registered', 'This phone number is already registered. Please login.');
+            setLoading(false);
             return;
           }
-          const payload = { name: name || 'Anonymous', phone: normalized, dob: dob || null, createdAt: serverTimestamp(), lastLogin: serverTimestamp() };
+          
+          const payload = { 
+            name: sanitizedName || 'Anonymous', 
+            phone: sanitizedPhone, 
+            dob: sanitizedDob || null, 
+            createdAt: serverTimestamp(), 
+            lastLogin: serverTimestamp(),
+            privacySettings: {
+              contactVisibility: 'registered', // Default to registered users only
+              profileVisibility: 'public'
+            }
+          };
+          
           await setDoc(userRef, payload, { merge: true });
-          const out = { id, name: name || 'Anonymous', phone: normalized, dob: dob || null, createdAt: new Date().toISOString(), lastLogin: new Date().toISOString() };
-          try { await AsyncStorage.setItem('user', JSON.stringify(out)); } catch (e) { console.error('Failed to save local user', e); }
+          
+          const out = { 
+            id, 
+            name: sanitizedName || 'Anonymous', 
+            phone: sanitizedPhone, 
+            dob: sanitizedDob || null, 
+            createdAt: new Date().toISOString(), 
+            lastLogin: new Date().toISOString() 
+          };
+          
+          try { 
+            await AsyncStorage.setItem('user', JSON.stringify(out)); 
+          } catch (e) { 
+            console.error('Failed to save local user', e); 
+          }
+          
           Alert.alert('Account Created', 'User registered successfully.');
-          setName(''); setPhone(''); setDob('');
+          setName(''); 
+          setPhone(''); 
+          setDob('');
           onLogin(out);
           return;
         } catch (err) {
           console.error('Registration failed', err);
-          Alert.alert('Error', 'Unable to create account on server. Please try again later.');
+          Alert.alert('Error', 'Unable to create account. Please try again later.');
+          setLoading(false);
           return;
         }
       } else {
-        // Try Firestore users collection first (if available)
+        // Login flow
         try {
           const userRef = doc(db, 'users', id);
           const snap = await getDoc(userRef);
-          if (snap && snap.exists && snap.exists()) {
+          
+          if (snap && snap.exists()) {
             const serverData = snap.data() || {};
-            const out = { id, name: serverData.name || name || 'Anonymous', phone: normalized, dob: serverData.dob || dob || null };
-            try { await AsyncStorage.setItem('user', JSON.stringify(out)); } catch (_) {}
-            Alert.alert('Welcome', 'Logged in.');
-            setName(''); setPhone(''); setDob('');
+            
+            // Update last login
+            try {
+              await setDoc(userRef, { lastLogin: serverTimestamp() }, { merge: true });
+            } catch (e) {
+              console.warn('Failed to update last login', e);
+            }
+            
+            const out = { 
+              id, 
+              name: serverData.name || sanitizedName || 'Anonymous', 
+              phone: sanitizedPhone, 
+              dob: serverData.dob || sanitizedDob || null,
+              privacySettings: serverData.privacySettings || {
+                contactVisibility: 'registered',
+                profileVisibility: 'public'
+              }
+            };
+            
+            try { 
+              await AsyncStorage.setItem('user', JSON.stringify(out)); 
+            } catch (_) {}
+            
+            Alert.alert('Welcome', 'Logged in successfully.');
+            setName(''); 
+            setPhone(''); 
+            setDob('');
             onLogin(out);
             return;
           } else {
-            // Not in Firestore — fall back to local storage
+            // Try local storage fallback
             const local = await AsyncStorage.getItem('user');
-            if (!local) { Alert.alert('Not found', 'Phone number not registered. Please sign up first.'); return; }
+            if (!local) { 
+              Alert.alert('Not found', 'Phone number not registered. Please sign up first.'); 
+              setLoading(false);
+              return; 
+            }
+            
             const serverData = JSON.parse(local);
-            if (serverData.id !== id) { Alert.alert('Not found', 'Phone number not registered. Please sign up first.'); return; }
-            const out = { id, name: serverData.name || name || 'Anonymous', phone: normalized, dob: serverData.dob || dob || null };
+            if (serverData.id !== id) { 
+              Alert.alert('Not found', 'Phone number not registered. Please sign up first.'); 
+              setLoading(false);
+              return; 
+            }
+            
+            const out = { 
+              id, 
+              name: serverData.name || sanitizedName || 'Anonymous', 
+              phone: sanitizedPhone, 
+              dob: serverData.dob || sanitizedDob || null 
+            };
+            
             Alert.alert('Welcome', 'Logged in locally.');
-            setName(''); setPhone(''); setDob('');
+            setName(''); 
+            setPhone(''); 
+            setDob('');
             onLogin(out);
             return;
           }
         } catch (err) {
           console.warn('Firestore read failed, falling back to local', err);
-          // fallback local login
+          // Local login fallback
           try {
             const local = await AsyncStorage.getItem('user');
-            if (!local) { Alert.alert('Not found', 'No local account found. Please register first.'); return; }
+            if (!local) { 
+              Alert.alert('Not found', 'No account found. Please register first.'); 
+              setLoading(false);
+              return; 
+            }
+            
             const serverData = JSON.parse(local);
-            if (serverData.id !== id) { Alert.alert('Not found', 'Phone number not registered locally. Please register first.'); return; }
-            const out = { id, name: serverData.name || name || 'Anonymous', phone: normalized, dob: serverData.dob || dob || null };
+            if (serverData.id !== id) { 
+              Alert.alert('Not found', 'Phone number not registered. Please register first.'); 
+              setLoading(false);
+              return; 
+            }
+            
+            const out = { 
+              id, 
+              name: serverData.name || sanitizedName || 'Anonymous', 
+              phone: sanitizedPhone, 
+              dob: serverData.dob || sanitizedDob || null 
+            };
+            
             Alert.alert('Welcome', 'Logged in locally.');
-            setName(''); setPhone(''); setDob('');
+            setName(''); 
+            setPhone(''); 
+            setDob('');
             onLogin(out);
             return;
           } catch (err2) {
             console.error('Local login failed', err2);
-            Alert.alert('Error', 'Unable to read local account.');
+            Alert.alert('Error', 'Unable to access account.');
+            setLoading(false);
             return;
           }
         }
@@ -279,8 +406,9 @@ export default function AuthScreen({ onLogin, onClose }) {
     } catch (e) {
       console.error(e);
       Alert.alert('Error', 'Something went wrong. Please try again.');
+    } finally {
+      setLoading(false);
     }
-   
   };
 
   return (
@@ -327,22 +455,42 @@ export default function AuthScreen({ onLogin, onClose }) {
             </Text>
 
             {isRegister && (
-              <TextInput
-                placeholder="Display name (optional)"
-                value={name}
-                onChangeText={setName}
-                style={[shared.input, { marginTop: 12 }]}
-                returnKeyType="done"
-                onSubmitEditing={() => Keyboard.dismiss()}
-                blurOnSubmit
-              />
+              <>
+                <TextInput
+                  placeholder="Display name (optional)"
+                  value={name}
+                  onChangeText={(text) => {
+                    setName(text);
+                    if (errors.name) validateInput('name', text);
+                  }}
+                  style={[
+                    shared.input, 
+                    { marginTop: 12 },
+                    errors.name && { borderColor: Colors.danger }
+                  ]}
+                  returnKeyType="done"
+                  onSubmitEditing={() => Keyboard.dismiss()}
+                  blurOnSubmit
+                  editable={!loading}
+                />
+                {errors.name ? (
+                  <Text style={styles.errorText}>{errors.name}</Text>
+                ) : null}
+              </>
             )}
 
             <TextInput
               placeholder="Phone number"
               value={phone}
-              onChangeText={setPhone}
-              style={[shared.input, { marginTop: 12 }]}
+              onChangeText={(text) => {
+                setPhone(text);
+                if (errors.phone) validateInput('phone', text);
+              }}
+              style={[
+                shared.input, 
+                { marginTop: 12 },
+                errors.phone && { borderColor: Colors.danger }
+              ]}
               keyboardType="phone-pad"
               inputAccessoryViewID={
                 Platform.OS === 'ios' ? inputAccessoryViewID : undefined
@@ -350,7 +498,11 @@ export default function AuthScreen({ onLogin, onClose }) {
               returnKeyType="done"
               blurOnSubmit
               onSubmitEditing={() => Keyboard.dismiss()}
+              editable={!loading}
             />
+            {errors.phone ? (
+              <Text style={styles.errorText}>{errors.phone}</Text>
+            ) : null}
 
             <TextInput
               placeholder="Date of birth (YYYY-MM-DD)"
@@ -361,17 +513,19 @@ export default function AuthScreen({ onLogin, onClose }) {
               returnKeyType="done"
               blurOnSubmit
               onSubmitEditing={() => Keyboard.dismiss()}
+              editable={!loading}
             />
 
             <TouchableOpacity
-              style={[shared.primaryButton, { marginTop: 14 }]}
-              onPress={() => {
-                Keyboard.dismiss();
-                handleSubmit();
-              }}
+              style={[
+                shared.primaryButton, 
+                { marginTop: 14, opacity: loading ? 0.7 : 1 }
+              ]}
+              onPress={handleSubmit}
+              disabled={loading}
             >
               <Text style={shared.primaryButtonText}>
-                {isRegister ? 'Register' : 'Login'}
+                {loading ? 'Processing...' : (isRegister ? 'Register' : 'Login')}
               </Text>
             </TouchableOpacity>
 
@@ -425,4 +579,11 @@ export default function AuthScreen({ onLogin, onClose }) {
   );
 }
 
-const styles = StyleSheet.create({});
+const styles = StyleSheet.create({
+  errorText: {
+    color: Colors.danger,
+    fontSize: 12,
+    marginTop: 4,
+    marginLeft: 4,
+  },
+});

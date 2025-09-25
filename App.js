@@ -2,12 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { View, Text, TouchableOpacity, Alert, Modal } from 'react-native';
 import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import AuthScreen from './components/AuthScreen';
 import JobsScreen from './components/JobsScreen';
 import SavedScreen from './components/SavedScreen';
 import PostScreen from './components/PostScreen';
 import JobDetailModal from './components/JobDetailModal';
 import MapScreen from './components/MapScreen';
+import ErrorBoundary from './components/ErrorBoundary';
 import initialJobs from './data/jobs';
 import { Colors, shared } from './components/Theme';
 import Header from './components/Header';
@@ -16,7 +18,6 @@ import ProfileModal from './components/ProfileModal';
 import { db } from './firebaseConfig';
 import { doc, setDoc, deleteDoc, serverTimestamp, collection, query as fsQuery, where, onSnapshot, getDoc } from 'firebase/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { UserProvider, useUser } from './context';
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -222,49 +223,130 @@ export default function App() {
   // Do not force auth on startup. Show AuthScreen modal when `authVisible` true.
 
   return (
-    <SafeAreaProvider>
-    <SafeAreaView style={shared.container}>
-      <Header
-        title="Amba connect"
-        onProfile={() => setProfileOpen(true)}
-        user={user}
-        onBack={detailJob ? (() => setDetailJob(null)) : (activeTab !== 'Jobs' ? (() => setActiveTab('Jobs')) : null)}
-      />
-
-      <View style={{ flex: 1, padding: 12 }}>
-        {activeTab === 'Jobs' && <JobsScreen jobs={jobs} onOpenJob={openJob} onSaveJob={saveJob} savedIds={savedIds} userLocation={userLocation} />}
-  {activeTab === 'Saved' && <SavedScreen savedJobs={savedJobs} onOpen={openJob} onSave={saveJob} />}
-        {activeTab === 'Post' && <PostScreen onPost={postJob} />}
-        {activeTab === 'Map' && (
-          <MapScreen
-            jobs={jobs.filter(j => j.kind === 'job')}
-            accommodations={jobs.filter(j => j.kind === 'accommodation')}
-            userLocation={userLocation}
-            onOpenJob={openJob}
-            onSave={saveJob}
-            savedIds={savedIds}
+    <ErrorBoundary>
+      <SafeAreaProvider>
+        <SafeAreaView style={shared.container}>
+          <Header
+            title="AmbaConnect"
+            onProfile={() => setProfileOpen(true)}
+            user={user}
+            onBack={detailJob ? (() => setDetailJob(null)) : (activeTab !== 'Jobs' ? (() => setActiveTab('Jobs')) : null)}
           />
-        )}
-      </View>
 
+          <View style={{ flex: 1, padding: 12 }}>
+            {activeTab === 'Jobs' && <JobsScreen jobs={jobs} onOpenJob={openJob} onSaveJob={saveJob} savedIds={savedIds} userLocation={userLocation} />}
+            {activeTab === 'Saved' && <SavedScreen savedJobs={savedJobs} onOpen={openJob} onSave={saveJob} />}
+            {activeTab === 'Post' && <PostScreen onPost={postJob} />}
+            {activeTab === 'Map' && (
+              <MapScreen
+                jobs={jobs.filter(j => j.kind === 'job')}
+                accommodations={jobs.filter(j => j.kind === 'accommodation')}
+                userLocation={userLocation}
+                onOpenJob={openJob}
+                onSave={saveJob}
+                savedIds={savedIds}
+              />
+            )}
+          </View>
 
-  <View style={{ flexDirection: 'row', borderTopWidth: 1, borderColor: Colors.bg, paddingBottom: 12, paddingTop: 6 }}>
-        <TouchableOpacity style={{ flex:1, padding:12, alignItems:'center' }} onPress={() => setActiveTab('Jobs')}><Text style={activeTab==='Jobs'?{color:Colors.primary,fontWeight:'700'}:undefined}>Jobs</Text></TouchableOpacity>
-        <TouchableOpacity style={{ flex:1, padding:12, alignItems:'center' }} onPress={() => setActiveTab('Saved')}><Text style={activeTab==='Saved'?{color:Colors.primary,fontWeight:'700'}:undefined}>Saved</Text></TouchableOpacity>
-        <TouchableOpacity style={{ flex:1, padding:12, alignItems:'center' }} onPress={() => setActiveTab('Post')}><Text style={activeTab==='Post'?{color:Colors.primary,fontWeight:'700'}:undefined}>Post</Text></TouchableOpacity>
-        <TouchableOpacity style={{ flex:1, padding:12, alignItems:'center' }} onPress={() => setActiveTab('Map')}><Text style={activeTab==='Map'?{color:Colors.primary,fontWeight:'700'}:undefined}>Map</Text></TouchableOpacity>
-      </View>
+          <View style={{ 
+            flexDirection: 'row', 
+            borderTopWidth: 1, 
+            borderColor: Colors.border, 
+            paddingBottom: 12, 
+            paddingTop: 6,
+            backgroundColor: Colors.card,
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: -2 },
+            shadowOpacity: 0.1,
+            shadowRadius: 8,
+            elevation: 8,
+          }}>
+            <TouchableOpacity 
+              style={{ flex:1, padding:12, alignItems:'center' }} 
+              onPress={() => setActiveTab('Jobs')}
+            >
+              <View style={{ alignItems: 'center' }}>
+                <Ionicons 
+                  name="briefcase" 
+                  size={20} 
+                  color={activeTab === 'Jobs' ? Colors.primary : Colors.muted} 
+                />
+                <Text style={[
+                  { fontSize: 12, marginTop: 4 },
+                  activeTab === 'Jobs' ? { color: Colors.primary, fontWeight: '600' } : { color: Colors.muted }
+                ]}>
+                  Jobs
+                </Text>
+              </View>
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={{ flex:1, padding:12, alignItems:'center' }} 
+              onPress={() => setActiveTab('Saved')}
+            >
+              <View style={{ alignItems: 'center' }}>
+                <Ionicons 
+                  name={activeTab === 'Saved' ? "heart" : "heart-outline"} 
+                  size={20} 
+                  color={activeTab === 'Saved' ? Colors.primary : Colors.muted} 
+                />
+                <Text style={[
+                  { fontSize: 12, marginTop: 4 },
+                  activeTab === 'Saved' ? { color: Colors.primary, fontWeight: '600' } : { color: Colors.muted }
+                ]}>
+                  Saved
+                </Text>
+              </View>
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={{ flex:1, padding:12, alignItems:'center' }} 
+              onPress={() => setActiveTab('Post')}
+            >
+              <View style={{ alignItems: 'center' }}>
+                <Ionicons 
+                  name="add-circle" 
+                  size={20} 
+                  color={activeTab === 'Post' ? Colors.primary : Colors.muted} 
+                />
+                <Text style={[
+                  { fontSize: 12, marginTop: 4 },
+                  activeTab === 'Post' ? { color: Colors.primary, fontWeight: '600' } : { color: Colors.muted }
+                ]}>
+                  Post
+                </Text>
+              </View>
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={{ flex:1, padding:12, alignItems:'center' }} 
+              onPress={() => setActiveTab('Map')}
+            >
+              <View style={{ alignItems: 'center' }}>
+                <Ionicons 
+                  name="map" 
+                  size={20} 
+                  color={activeTab === 'Map' ? Colors.primary : Colors.muted} 
+                />
+                <Text style={[
+                  { fontSize: 12, marginTop: 4 },
+                  activeTab === 'Map' ? { color: Colors.primary, fontWeight: '600' } : { color: Colors.muted }
+                ]}>
+                  Map
+                </Text>
+              </View>
+            </TouchableOpacity>
+          </View>
 
-  <JobDetailModal visibleJob={detailJob} onClose={() => setDetailJob(null)} showContact={showContact} setShowContact={setShowContact} user={user} onDelete={deletePost} />
-  <ProfileModal visible={profileOpen} user={user} onClose={() => setProfileOpen(false)} onSave={(u) => { setUser(u); }} />
+          <JobDetailModal visibleJob={detailJob} onClose={() => setDetailJob(null)} showContact={showContact} setShowContact={setShowContact} user={user} onDelete={deletePost} />
+          <ProfileModal visible={profileOpen} user={user} onClose={() => setProfileOpen(false)} onSave={(u) => { setUser(u); }} />
 
-    <Modal visible={authVisible} animationType="slide" onRequestClose={() => setAuthVisible(false)}>
-      <AuthScreen onLogin={handleLogin} onClose={() => setAuthVisible(false)} />
-    </Modal>
+          <Modal visible={authVisible} animationType="slide" onRequestClose={() => setAuthVisible(false)}>
+            <AuthScreen onLogin={handleLogin} onClose={() => setAuthVisible(false)} />
+          </Modal>
 
-      <StatusBar style="auto" />
-    </SafeAreaView>
-    </SafeAreaProvider>
+          <StatusBar style="auto" />
+        </SafeAreaView>
+      </SafeAreaProvider>
+    </ErrorBoundary>
   );
 }
 

@@ -1,6 +1,8 @@
 import React from 'react';
 import { View, Text, Image, TouchableOpacity, StyleSheet } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { shared, Colors } from './Theme';
+import OptimizedImage from './OptimizedImage';
 const placeholder = require('../assets/icon.png');
 
 const toRad = (deg) => deg * Math.PI / 180;
@@ -25,36 +27,233 @@ export default function JobItem({ item, onOpen, onSave, saved, userLocation }) {
     } catch (e) {}
   }
 
+  const getJobCategory = (title) => {
+    const titleLower = (title || '').toLowerCase();
+    if (titleLower.includes('barista') || titleLower.includes('cafe') || titleLower.includes('restaurant')) return 'cafe';
+    if (titleLower.includes('warehouse') || titleLower.includes('helper')) return 'cube';
+    if (titleLower.includes('dog') || titleLower.includes('pet')) return 'paw';
+    if (titleLower.includes('baby') || titleLower.includes('child')) return 'person';
+    if (titleLower.includes('delivery') || titleLower.includes('driver')) return 'car';
+    if (titleLower.includes('retail') || titleLower.includes('shop')) return 'storefront';
+    if (titleLower.includes('tech') || titleLower.includes('support')) return 'laptop';
+    if (titleLower.includes('clean')) return 'sparkles';
+    return 'briefcase';
+  };
+
+  const getTimeAgo = (dateInput) => {
+    if (!dateInput) return '';
+    
+    try {
+      let date;
+      
+      // Handle Firestore timestamp objects (same logic as JobDetailModal)
+      if (typeof dateInput === 'object' && dateInput.toDate) {
+        date = dateInput.toDate();
+      } else {
+        date = new Date(dateInput);
+      }
+      
+      const now = new Date();
+      
+      // Check if date is valid
+      if (isNaN(date.getTime())) {
+        return '';
+      }
+      
+      const diffInMinutes = Math.floor((now - date) / (1000 * 60));
+      
+      if (diffInMinutes < 1) return 'Just now';
+      if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
+      
+      const diffInHours = Math.floor(diffInMinutes / 60);
+      if (diffInHours < 24) return `${diffInHours}h ago`;
+      
+      const diffInDays = Math.floor(diffInHours / 24);
+      if (diffInDays < 7) return `${diffInDays}d ago`;
+      
+      const diffInWeeks = Math.floor(diffInDays / 7);
+      return `${diffInWeeks}w ago`;
+    } catch (error) {
+      console.warn('Error parsing date:', dateInput, error);
+      return '';
+    }
+  };
+
   return (
     <TouchableOpacity style={[shared.card, styles.jobCard]} onPress={() => onOpen(item)}>
-      <Image source={typeof primaryImage === 'string' ? { uri: primaryImage } : primaryImage} style={styles.avatar} />
-      <View style={{ flex: 1 }}>
-        <Text style={styles.jobTitle}>{item.title}</Text>
+      <View style={styles.cardContent}>
+        {/* Compact header with title and actions */}
+        <View style={styles.cardHeader}>
+          <View style={styles.titleContainer}>
+            <Text style={styles.jobTitle} numberOfLines={2}>{item.title}</Text>
+            <Text style={styles.timeAgo}>{getTimeAgo(item.createdAt)}</Text>
+          </View>
+          <View style={styles.rightActions}>
+            <TouchableOpacity style={styles.typeButton}>
+              <Ionicons 
+                name={item.kind === 'accommodation' ? 'home' : 'briefcase'}
+                size={16}
+                color={Colors.primary}
+              />
+            </TouchableOpacity>
+            <TouchableOpacity 
+              onPress={() => onSave(item)} 
+              style={[styles.saveButton, saved && styles.saveButtonActive]}
+            >
+              <Ionicons 
+                name={saved ? "heart" : "heart-outline"} 
+                size={16} 
+                color={saved ? Colors.primary : Colors.muted}
+              />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Job/Accommodation specific info */}
         {item.kind === 'accommodation' ? (
-          <>
-            <Text style={styles.jobMeta}>Rent: {item.rent} {item.currency ? item.currency : ''} • {distanceLabel}</Text>
-            {item.availability ? <Text style={styles.jobMeta}>Availability: {item.availability}</Text> : null}
-            {item.duration ? <Text style={styles.jobMeta}>Duration: {item.duration.start || 'N/A'} — {item.duration.end || 'N/A'}</Text> : null}
-          </>
+          <View style={styles.infoContainer}>
+            <Text style={styles.primaryInfo}>
+              {item.rent} {item.currency || 'USD'}/month
+            </Text>
+            <Text style={styles.secondaryInfo}>
+              {item.accomType} • {item.availability}
+            </Text>
+          </View>
         ) : (
-          <>
-            <Text style={styles.jobMeta}>{item.type} • {distanceLabel}</Text>
-            <Text style={styles.jobMeta}>{item.salary} {item.currency ? item.currency : ''} {item.salaryType === 'hourly' ? '/hr' : '/week'}</Text>
-            {item.duration ? <Text style={styles.jobMeta}>Duration: {item.duration.start || 'N/A'} — {item.duration.end || 'N/A'}</Text> : null}
-          </>
+          <View style={styles.infoContainer}>
+            <Text style={styles.primaryInfo}>
+              {item.salary} {item.currency || 'USD'}
+              {item.salaryType === 'hourly' ? '/hr' : item.salaryType === 'daily' ? '/day' : '/week'}
+            </Text>
+            <Text style={styles.secondaryInfo}>
+              {item.type} • {item.experienceRequired ? 'Experience required' : 'No experience needed'}
+            </Text>
+          </View>
+        )}
+
+        {/* Location */}
+        <View style={styles.locationRow}>
+          <Ionicons name="location-outline" size={12} color={Colors.muted} />
+          <Text style={styles.locationText}>{distanceLabel}</Text>
+        </View>
+
+        {/* Tags/Keywords if available */}
+        {item.tags && item.tags.length > 0 && (
+          <View style={styles.tagsContainer}>
+            {item.tags.slice(0, 3).map((tag, index) => (
+              <View key={index} style={styles.tag}>
+                <Text style={styles.tagText}>{tag}</Text>
+              </View>
+            ))}
+          </View>
         )}
       </View>
-      <TouchableOpacity onPress={() => onSave(item)} style={[styles.saveButton, saved ? { backgroundColor: Colors.accent, borderColor: Colors.accent } : { backgroundColor: Colors.card, borderColor: Colors.primary }]}>
-        <Text style={{ color: saved ? Colors.card : Colors.primary, fontWeight: '700' }}>{saved ? 'Saved' : 'Save'}</Text>
-      </TouchableOpacity>
     </TouchableOpacity>
   );
 }
 
 const styles = StyleSheet.create({
-  jobCard: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
-  avatar: { width: 64, height: 64, borderRadius: 12, marginRight: 12 },
-  jobTitle: { fontWeight: '800', fontSize: 16 },
-  jobMeta: { color: Colors.muted, marginTop: 6 },
-  saveButton: { padding: 8, borderRadius: 10, borderWidth: 1, borderColor: Colors.primary, backgroundColor: Colors.card },
+  jobCard: { 
+    marginBottom: 8, 
+    marginHorizontal: 4,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 1,
+    },
+    shadowOpacity: 0.08,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  cardContent: {
+    padding: 12,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 8,
+  },
+  titleContainer: {
+    flex: 1,
+    marginRight: 12,
+  },
+  rightActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  typeButton: {
+    backgroundColor: Colors.primary + '15',
+    borderRadius: 16,
+    width: 28,
+    height: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  jobTitle: { 
+    fontWeight: '600', 
+    fontSize: 16,
+    color: Colors.text,
+    lineHeight: 20,
+    marginBottom: 2,
+  },
+  timeAgo: {
+    fontSize: 11,
+    color: Colors.muted,
+    fontWeight: '400',
+  },
+  saveButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: Colors.bg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  saveButtonActive: {
+    backgroundColor: Colors.primary + '15',
+    borderColor: Colors.primary,
+  },
+  infoContainer: {
+    marginBottom: 8,
+  },
+  primaryInfo: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.primary,
+    marginBottom: 3,
+  },
+  secondaryInfo: {
+    fontSize: 12,
+    color: Colors.muted,
+  },
+  locationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  locationText: {
+    fontSize: 12,
+    color: Colors.muted,
+    marginLeft: 4,
+  },
+  tagsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginTop: 4,
+  },
+  tag: {
+    backgroundColor: Colors.bg,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+    marginRight: 4,
+    marginBottom: 3,
+  },
+  tagText: {
+    fontSize: 10,
+    color: Colors.muted,
+  },
 });
