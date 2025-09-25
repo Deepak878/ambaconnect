@@ -1,42 +1,272 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, FlatList, TouchableOpacity, Image } from 'react-native';
+import { View, Text, FlatList, TouchableOpacity, Image, StyleSheet } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { shared, Colors } from './Theme';
 const placeholder = require('../assets/icon.png');
 
-export default function SavedScreen({ savedJobs = [], onOpen, onSave }) {
-  const [items, setItems] = useState(savedJobs || []);
+export default function SavedScreen({ savedJobs = [], onOpen, onSave, user }) {
+  const [items, setItems] = useState([]);
+
+  const getTimeAgo = (dateInput) => {
+    if (!dateInput) return '';
+    
+    try {
+      let date;
+      
+      // Handle Firestore timestamp objects
+      if (typeof dateInput === 'object' && dateInput.toDate) {
+        date = dateInput.toDate();
+      } else {
+        date = new Date(dateInput);
+      }
+      
+      const now = new Date();
+      
+      // Check if date is valid
+      if (isNaN(date.getTime())) {
+        return '';
+      }
+      
+      const diffInMinutes = Math.floor((now - date) / (1000 * 60));
+      
+      if (diffInMinutes < 1) return 'Just now';
+      if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
+      
+      const diffInHours = Math.floor(diffInMinutes / 60);
+      if (diffInHours < 24) return `${diffInHours}h ago`;
+      
+      const diffInDays = Math.floor(diffInHours / 24);
+      if (diffInDays < 7) return `${diffInDays}d ago`;
+      
+      const diffInWeeks = Math.floor(diffInDays / 7);
+      return `${diffInWeeks}w ago`;
+    } catch (error) {
+      return '';
+    }
+  };
 
   useEffect(() => {
+    if (!user || !user.phone) {
+      setItems([]);
+      return;
+    }
+    
     setItems(savedJobs || []);
-  }, [savedJobs]);
+  }, [savedJobs, user]);
 
   if (!items || !items.length) {
     return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-        <Text style={{ color: Colors.muted }}>No saved items yet.</Text>
+      <View style={styles.emptyContainer}>
+        <Ionicons name="heart-outline" size={48} color={Colors.muted} />
+        <Text style={styles.emptyTitle}>No saved items yet</Text>
+        <Text style={styles.emptySubtext}>
+          Save jobs and accommodations to view them here
+        </Text>
       </View>
     );
   }
 
-  return (
-    <FlatList
-      data={items}
-      keyExtractor={i => i.id}
-      contentContainerStyle={{ padding: 12 }}
-      renderItem={({ item }) => (
-        <TouchableOpacity key={item.id} style={[shared.card, { flexDirection: 'row', alignItems: 'center', marginBottom: 10 }]} onPress={() => onOpen(item)}>
-          <Image source={(item.images && item.images[0]) ? (typeof item.images[0] === 'string' ? { uri: item.images[0] } : item.images[0]) : placeholder} style={{ width: 56, height: 56, borderRadius: 28, marginRight: 12 }} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ fontWeight: '700' }}>{item.title}</Text>
-            <Text style={{ color: Colors.muted, marginTop: 4 }}>{item.type} • {item.location}</Text>
+  const renderItem = ({ item }) => {
+    const isAccommodation = item.kind === 'accommodation';
+    
+    return (
+      <TouchableOpacity 
+        style={styles.itemCard} 
+        onPress={() => onOpen(item)}
+      >
+        <View style={styles.itemHeader}>
+          <View style={[styles.typeIcon, { 
+            backgroundColor: isAccommodation ? (Colors.secondary || '#FF6B6B') + '20' : Colors.primary + '20' 
+          }]}>
+            <Ionicons 
+              name={isAccommodation ? 'home' : 'briefcase'} 
+              size={18} 
+              color={isAccommodation ? Colors.secondary || '#FF6B6B' : Colors.primary} 
+            />
           </View>
-          {onSave ? (
-            <TouchableOpacity onPress={() => onSave(item)} style={{ padding: 8, borderRadius: 8, backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.primary }}>
-              <Text style={{ color: Colors.primary, fontWeight: '700' }}>Unsave</Text>
+          
+          {onSave && (
+            <TouchableOpacity 
+              onPress={() => onSave(item)} 
+              style={styles.unsaveButton}
+            >
+              <Ionicons name="heart" size={16} color={Colors.primary} />
+              <Text style={styles.unsaveText}>Saved</Text>
             </TouchableOpacity>
-          ) : null}
-        </TouchableOpacity>
-      )}
-    />
+          )}
+        </View>
+
+        <Text style={styles.itemTitle} numberOfLines={2}>
+          {item.title}
+        </Text>
+        
+        <Text style={styles.itemSubtitle}>
+          {isAccommodation 
+            ? `${item.accomType || 'Accommodation'} • ${item.location}` 
+            : `${item.type} • ${item.location}`
+          }
+        </Text>
+
+        <Text style={styles.itemPrice}>
+          {isAccommodation 
+            ? `${item.rent} ${item.currency || 'USD'}/month`
+            : `${item.salary} ${item.currency || 'USD'}${item.salaryType === 'hourly' ? '/hr' : item.salaryType === 'daily' ? '/day' : '/week'}`
+          }
+        </Text>
+
+        <View style={styles.itemFooter}>
+          <View style={styles.locationContainer}>
+            <Ionicons name="location-outline" size={12} color={Colors.muted} />
+            <Text style={styles.locationText}>{item.location}</Text>
+          </View>
+          
+          {item.createdAt && (
+            <Text style={styles.dateText}>
+              {getTimeAgo(item.createdAt)}
+            </Text>
+          )}
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  return (
+    <View style={{ flex: 1 }}>
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>
+          {items.length} saved item{items.length !== 1 ? 's' : ''}
+        </Text>
+        <Text style={styles.headerSubtitle}>
+          Jobs and accommodations you've saved
+        </Text>
+      </View>
+      
+      <FlatList
+        data={items}
+        keyExtractor={item => item.id}
+        contentContainerStyle={styles.listContainer}
+        renderItem={renderItem}
+        showsVerticalScrollIndicator={false}
+      />
+    </View>
   );
 }
+
+const styles = StyleSheet.create({
+  emptyContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 32,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: Colors.text,
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  emptySubtext: {
+    fontSize: 14,
+    color: Colors.muted,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  header: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+    backgroundColor: Colors.card,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: Colors.text,
+    marginBottom: 4,
+  },
+  headerSubtitle: {
+    fontSize: 14,
+    color: Colors.muted,
+  },
+  listContainer: {
+    padding: 12,
+  },
+  itemCard: {
+    backgroundColor: Colors.card,
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  itemHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  typeIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  unsaveButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: Colors.primary + '15',
+  },
+  unsaveText: {
+    color: Colors.primary,
+    fontSize: 12,
+    fontWeight: '600',
+    marginLeft: 4,
+  },
+  itemTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: Colors.text,
+    marginBottom: 6,
+    lineHeight: 22,
+  },
+  itemSubtitle: {
+    fontSize: 14,
+    color: Colors.muted,
+    marginBottom: 8,
+  },
+  itemPrice: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.primary,
+    marginBottom: 12,
+  },
+  itemFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  locationContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  locationText: {
+    fontSize: 12,
+    color: Colors.muted,
+    marginLeft: 4,
+  },
+  dateText: {
+    fontSize: 12,
+    color: Colors.muted,
+  },
+});

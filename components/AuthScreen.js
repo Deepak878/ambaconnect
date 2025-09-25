@@ -209,6 +209,28 @@ export default function AuthScreen({ onLogin, onClose }) {
     return validation;
   };
 
+  const formatDOB = (text) => {
+    // Remove all non-digit characters
+    const digits = text.replace(/\D/g, '');
+    
+    // Limit to 8 digits (YYYYMMDD)
+    const limitedDigits = digits.slice(0, 8);
+    
+    // Format based on length
+    if (limitedDigits.length <= 4) {
+      return limitedDigits;
+    } else if (limitedDigits.length <= 6) {
+      return `${limitedDigits.slice(0, 4)}-${limitedDigits.slice(4)}`;
+    } else {
+      return `${limitedDigits.slice(0, 4)}-${limitedDigits.slice(4, 6)}-${limitedDigits.slice(6)}`;
+    }
+  };
+
+  const handleDOBChange = (text) => {
+    const formatted = formatDOB(text);
+    setDob(formatted);
+  };
+
   const handleSubmit = async () => {
     setLoading(true);
     setErrors({});
@@ -507,13 +529,14 @@ export default function AuthScreen({ onLogin, onClose }) {
             <TextInput
               placeholder="Date of birth (YYYY-MM-DD)"
               value={dob}
-              onChangeText={setDob}
+              onChangeText={handleDOBChange}
               style={[shared.input, { marginTop: 12 }]}
-              keyboardType="default"
+              keyboardType="numeric"
               returnKeyType="done"
               blurOnSubmit
               onSubmitEditing={() => Keyboard.dismiss()}
               editable={!loading}
+              maxLength={10}
             />
 
             <TouchableOpacity

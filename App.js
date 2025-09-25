@@ -16,7 +16,7 @@ import Header from './components/Header';
 import * as Location from 'expo-location';
 import ProfileModal from './components/ProfileModal';
 import { db } from './firebaseConfig';
-import { doc, setDoc, deleteDoc, serverTimestamp, collection, query as fsQuery, where, onSnapshot, getDoc } from 'firebase/firestore';
+import { doc, setDoc, deleteDoc, serverTimestamp, collection, query as fsQuery, where, onSnapshot, getDoc, getDocs, addDoc } from 'firebase/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function App() {
@@ -92,19 +92,20 @@ export default function App() {
       const userPhone = user.phone ? ('' + user.phone).replace(/[^0-9]/g, '') : user.id;
       const docId = `${userPhone}_${job.id}`;
       const ref = doc(db, 'saved', docId);
-      if (savedIds.includes(job.id)) {
+      
+      if (savedIds.includes(String(job.id))) {
         // remove saved
         await deleteDoc(ref);
-        setSavedIds(prev => prev.filter(id => id !== job.id));
+        setSavedIds(prev => prev.filter(id => id !== String(job.id)));
       } else {
         await setDoc(ref, {
           userPhone,
-          jobId: job.id,
+          jobId: String(job.id),  // Ensure jobId is stored as string to match jobs array
           kind: job.kind || 'job',
           title: job.title || '',
           createdAt: serverTimestamp(),
         });
-        setSavedIds(prev => [...prev, job.id]);
+        setSavedIds(prev => [...prev, String(job.id)]);
       }
     } catch (e) {
       console.error('Failed to update saved collection', e);
@@ -119,10 +120,20 @@ export default function App() {
       return;
     }
 
-    // persistence removed: store new post in-memory
-    const local = { ...job, createdAt: new Date().toISOString(), owner: user?.id || null, id: 'local_' + Date.now() };
-    setJobs(prev => [local, ...prev]);
-    setActiveTab('Jobs');
+    try {
+      // Save to appropriate Firestore collection
+      const collection_name = job.kind === 'accommodation' ? 'accommodations' : 'jobs';
+      const docRef = await addDoc(collection(db, collection_name), {
+        ...job,
+        createdAt: serverTimestamp(),
+        owner: user.id || null,
+      });
+      
+      // The job will be automatically added to the jobs array via the onSnapshot listener
+      setActiveTab('Jobs');
+    } catch (error) {
+      Alert.alert('Error', 'Unable to post job. Please try again.');
+    }
   };
 
   const deletePost = async (post) => {
@@ -150,10 +161,13 @@ export default function App() {
       }}
     ]);
   };
-  const savedJobs = jobs.filter(j => savedIds.includes(j.id));
+  const savedJobs = jobs.filter(j => savedIds.includes(String(j.id)));
 
   useEffect(() => {
     let unsubSaved = null;
+    let unsubJobs = null;
+    let unsubAccommodations = null;
+    
     // load persisted user from AsyncStorage for app persistence
     (async () => {
       try {
@@ -164,13 +178,74 @@ export default function App() {
         }
       } catch (e) { console.warn('Failed to load persisted user', e); }
     })();
+
+    // Load jobs from Firestore 'jobs' collection
+    const jobsQuery = fsQuery(collection(db, 'jobs'));
+    unsubJobs = onSnapshot(jobsQuery, (snapshot) => {
+      const firestoreJobs = snapshot.docs.map(doc => ({
+        id: doc.id, // Use Firestore document ID
+        kind: 'job',
+        ...doc.data()
+      }));
+      
+      // Load accommodations from Firestore 'accommodations' collection
+      const accommodationsQuery = fsQuery(collection(db, 'accommodations'));
+      unsubAccommodations = onSnapshot(accommodationsQuery, (accomSnapshot) => {
+        const firestoreAccommodations = accomSnapshot.docs.map(doc => ({
+          id: doc.id, // Use Firestore document ID
+          kind: 'accommodation',
+          ...doc.data()
+        }));
+        
+        // Combine both jobs and accommodations, with fallback to initial data if empty
+        const allJobs = [...firestoreJobs, ...firestoreAccommodations];
+        if (allJobs.length === 0) {
+          setJobs(initialJobs);
+        } else {
+          setJobs(allJobs);
+        }
+      }, (error) => {
+        // Fallback to initial data on error
+        setJobs(initialJobs);
+      });
+    }, (error) => {
+      // Fallback to initial data on error
+      setJobs(initialJobs);
+    });
     if (user && user.id) {
       const userPhone = user.phone ? ('' + user.phone).replace(/[^0-9]/g, '') : user.id;
-      const q = fsQuery(collection(db, 'saved'), where('userPhone', '==', userPhone));
+      
+      // Query ALL saved documents (remove user filter for debugging)
+      const q = fsQuery(collection(db, 'saved'));
       unsubSaved = onSnapshot(q, snap => {
-        const ids = snap.docs.map(d => d.data()?.jobId).filter(Boolean);
+        // Try to extract jobIds from document data first, then fallback to document ID
+        const ids = snap.docs.map(d => {
+          const docId = d.id;
+          const first10 = docId.substring(0, 10);
+          const belongsToUser = first10 === userPhone.substring(0, 10);
+          
+          if (!belongsToUser) {
+            return null;
+          }
+          
+          const data = d.data();
+          // First try to get jobId from document data
+          if (data?.jobId) {
+            // Ensure jobId is a string to match jobs array
+            return String(data.jobId);
+          }
+          // Fallback: extract jobId from document ID (userPhone_jobId format)
+          if (docId.includes('_')) {
+            const parts = docId.split('_');
+            const jobId = parts[parts.length - 1]; // Take the last part as jobId
+            // Ensure extracted jobId is a string to match jobs array
+            return String(jobId);
+          }
+          return null;
+        }).filter(Boolean);
+        
         setSavedIds(ids);
-      }, err => console.warn('saved snapshot error', err));
+      });
     } else {
       setSavedIds([]);
     }
@@ -190,34 +265,55 @@ export default function App() {
         // ignore location errors
       }
     })();
-    // one-time seed of local initialJobs into Firestore if not seeded
+    // Optional: Seed initial jobs into Firestore if collections are empty
+    // This will create jobs with real Firestore document IDs
     (async () => {
       try {
         const seeded = await AsyncStorage.getItem('seeded_firestore');
         if (!seeded) {
-          // push each initial job into the appropriate collection using provided id (if any)
-          const makeTags = (j) => {
-            const parts = [];
-            if (j.title) parts.push(...j.title.split(/[^a-zA-Z0-9]+/));
-            if (j.kind) parts.push(j.kind);
-            if (j.type) parts.push(j.type);
-            if (j.accomType) parts.push(j.accomType);
-            if (j.location) parts.push(...j.location.split(/[^a-zA-Z0-9]+/));
-            if (j.currency) parts.push(j.currency);
-            const normalized = parts.map(p => (p || '').toString().toLowerCase()).filter(Boolean);
-            return Array.from(new Set(normalized));
-          };
-
-          // seed into in-memory jobs list
-          setJobs(prev => {
-            const seeded = initialJobs.map(j => ({ ...j, createdAt: new Date().toISOString(), owner: j.owner || null, tags: makeTags(j), id: j.id || 'seed_' + Math.random().toString(36).slice(2,9) }));
-            return [...seeded, ...prev];
-          });
+          // Check if jobs collection is empty
+          const jobsSnapshot = await getDocs(collection(db, 'jobs'));
+          const accommodationsSnapshot = await getDocs(collection(db, 'accommodations'));
+          
+          if (jobsSnapshot.empty && accommodationsSnapshot.empty) {
+            // Seed jobs
+            const jobsToSeed = initialJobs.filter(j => j.kind === 'job' || !j.kind);
+            for (const job of jobsToSeed) {
+              const { id, ...jobData } = job; // Remove the old ID
+              await addDoc(collection(db, 'jobs'), {
+                ...jobData,
+                kind: 'job',
+                createdAt: serverTimestamp(),
+                owner: null,
+              });
+            }
+            
+            // Seed accommodations
+            const accommodationsToSeed = initialJobs.filter(j => j.kind === 'accommodation');
+            for (const accommodation of accommodationsToSeed) {
+              const { id, ...accomData } = accommodation; // Remove the old ID
+              await addDoc(collection(db, 'accommodations'), {
+                ...accomData,
+                kind: 'accommodation',
+                createdAt: serverTimestamp(),
+                owner: null,
+              });
+            }
+            
+            await AsyncStorage.setItem('seeded_firestore', 'true');
+          }
         }
-      } catch (e) {}
+      } catch (e) {
+        // Seeding error ignored
+      }
     })();
     // persistence removed: no Firestore listeners or AsyncStorage read on startup
-    return () => { if (locationSub && locationSub.remove) locationSub.remove(); if (unsubSaved) unsubSaved(); };
+    return () => { 
+      if (locationSub && locationSub.remove) locationSub.remove(); 
+      if (unsubSaved) unsubSaved(); 
+      if (unsubJobs) unsubJobs();
+      if (unsubAccommodations) unsubAccommodations();
+    };
   }, []);
 
   // Do not force auth on startup. Show AuthScreen modal when `authVisible` true.
@@ -235,7 +331,7 @@ export default function App() {
 
           <View style={{ flex: 1, padding: 12 }}>
             {activeTab === 'Jobs' && <JobsScreen jobs={jobs} onOpenJob={openJob} onSaveJob={saveJob} savedIds={savedIds} userLocation={userLocation} />}
-            {activeTab === 'Saved' && <SavedScreen savedJobs={savedJobs} onOpen={openJob} onSave={saveJob} />}
+            {activeTab === 'Saved' && <SavedScreen savedJobs={savedJobs} onOpen={openJob} onSave={saveJob} user={user} />}
             {activeTab === 'Post' && <PostScreen onPost={postJob} />}
             {activeTab === 'Map' && (
               <MapScreen
