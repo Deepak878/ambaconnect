@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ScrollView, TextInput, TouchableOpacity, Text, View, Alert, Modal, FlatList, Switch, ActivityIndicator, Image, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -28,7 +28,8 @@ function haversineKm(a, b) {
 
 const currencyList = [ 'USD','EUR','GBP','INR','NPR','AUD','CAD','JPY','CNY','SGD','HKD','ZAR','BRL','RUB','MXN','KRW','AED','SAR','TRY','CHF','SEK','NOK','DKK','PLN','IDR','MYR','THB','VND','PHP','KES','NGN' ];
 
-export default function PostScreen({ onPost }) {
+export default function PostScreen({ onPost, onOpenAuth, user }) {
+  const [checkingAuth, setCheckingAuth] = useState(false);
   const [postKind, setPostKind] = useState('job');
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
@@ -85,6 +86,13 @@ export default function PostScreen({ onPost }) {
   const [myPosts, setMyPosts] = useState([]);
   const [loadingMyPosts, setLoadingMyPosts] = useState(false);
   const [editingPost, setEditingPost] = useState(null);
+
+  // Check authentication status when user prop changes
+  useEffect(() => {
+    // The PostScreen will automatically re-render when user prop changes
+    // No need for additional authentication checking since user is passed as prop
+    setCheckingAuth(false);
+  }, [user]);
 
   // Computed value to check if we're in editing mode
   const isEditing = editingPost !== null;
@@ -794,6 +802,41 @@ export default function PostScreen({ onPost }) {
 
   if (loading) {
     return <LoadingSpinner message="Posting your listing..." />;
+  }
+
+  // Show login prompt if user is not authenticated
+  if (!user || !user.id) {
+    return (
+      <View style={styles.loginPromptContainer}>
+        <View style={styles.loginPromptCard}>
+          <Ionicons 
+            name="lock-closed-outline" 
+            size={64} 
+            color={Colors.primary} 
+            style={styles.loginPromptIcon} 
+          />
+          <Text style={styles.loginPromptTitle}>Login Required</Text>
+          <Text style={styles.loginPromptSubtitle}>
+            You need to be logged in to create and post jobs or accommodations. 
+            Please login or create an account to continue.
+          </Text>
+          <TouchableOpacity 
+            style={[shared.primaryButton, styles.loginButton]}
+            onPress={() => {
+              // Open the auth modal from the parent component
+              if (onOpenAuth) {
+                onOpenAuth();
+              } else {
+                Alert.alert('Login Required', 'Please implement authentication flow');
+              }
+            }}
+          >
+            <Ionicons name="log-in" size={20} color={Colors.card} style={{ marginRight: 8 }} />
+            <Text style={shared.primaryButtonText}>Login / Sign Up</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
   }
 
   return (
@@ -1571,6 +1614,52 @@ export default function PostScreen({ onPost }) {
 }
 
 const styles = StyleSheet.create({
+  // Login prompt styles
+  loginPromptContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+    backgroundColor: Colors.bg,
+  },
+  loginPromptCard: {
+    backgroundColor: Colors.card,
+    borderRadius: 16,
+    padding: 32,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+    maxWidth: 320,
+    width: '100%',
+  },
+  loginPromptIcon: {
+    marginBottom: 24,
+  },
+  loginPromptTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: Colors.text,
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  loginPromptSubtitle: {
+    fontSize: 16,
+    color: Colors.muted,
+    textAlign: 'center',
+    lineHeight: 24,
+    marginBottom: 32,
+  },
+  loginButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+  },
+
   // Modal styles
   modalHeader: {
     flexDirection: 'row',

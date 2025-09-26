@@ -307,7 +307,7 @@ export default function AuthScreen({ onLogin, onClose }) {
             console.error('Failed to save local user', e); 
           }
           
-          Alert.alert('Account Created', 'User registered successfully.');
+          // Success - call onLogin to redirect user back to the app
           setName(''); 
           setPhone(''); 
           setDob('');
@@ -350,7 +350,7 @@ export default function AuthScreen({ onLogin, onClose }) {
               await AsyncStorage.setItem('user', JSON.stringify(out)); 
             } catch (_) {}
             
-            Alert.alert('Welcome', 'Logged in successfully.');
+            // Success - call onLogin to redirect user back to the app
             setName(''); 
             setPhone(''); 
             setDob('');
@@ -379,7 +379,7 @@ export default function AuthScreen({ onLogin, onClose }) {
               dob: serverData.dob || sanitizedDob || null 
             };
             
-            Alert.alert('Welcome', 'Logged in locally.');
+            // Success - call onLogin to redirect user back to the app
             setName(''); 
             setPhone(''); 
             setDob('');
@@ -411,7 +411,7 @@ export default function AuthScreen({ onLogin, onClose }) {
               dob: serverData.dob || sanitizedDob || null 
             };
             
-            Alert.alert('Welcome', 'Logged in locally.');
+            // Success - call onLogin to redirect user back to the app
             setName(''); 
             setPhone(''); 
             setDob('');

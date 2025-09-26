@@ -1,11 +1,42 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { View, Text, FlatList, TouchableOpacity, Image, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { shared, Colors } from './Theme';
 const placeholder = require('../assets/icon.png');
 
-export default function SavedScreen({ savedJobs = [], onOpen, onSave, user }) {
+const toRad = (deg) => deg * Math.PI / 180;
+const haversineKm = (lat1, lon1, lat2, lon2) => {
+  const R = 6371; // km
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R * c;
+};
+
+export default function SavedScreen({ savedJobs = [], onOpen, onSave, user, userLocation }) {
   const [items, setItems] = useState([]);
+
+  // Calculate distances for saved items just like JobsScreen does
+  const enrichedItems = useMemo(() => {
+    return items.map(item => {
+      let distance = null;
+      let distanceLabel = item.location || '';
+      
+      if (userLocation && item.lat && item.lng) {
+        try {
+          distance = haversineKm(userLocation.latitude, userLocation.longitude, item.lat, item.lng);
+          if (!isNaN(distance)) {
+            distanceLabel = distance < 1 ? `${Math.round(distance*1000)} m away` : `${distance.toFixed(1)} km away`;
+          }
+        } catch (e) {
+          console.warn('Error calculating distance:', e);
+        }
+      }
+      
+      return { ...item, _distanceKm: distance, _distanceLabel: distanceLabel };
+    });
+  }, [items, userLocation]);
 
   const getTimeAgo = (dateInput) => {
     if (!dateInput) return '';
@@ -54,7 +85,7 @@ export default function SavedScreen({ savedJobs = [], onOpen, onSave, user }) {
     setItems(savedJobs || []);
   }, [savedJobs, user]);
 
-  if (!items || !items.length) {
+  if (!enrichedItems || !enrichedItems.length) {
     return (
       <View style={styles.emptyContainer}>
         <Ionicons name="heart-outline" size={48} color={Colors.muted} />
@@ -117,7 +148,7 @@ export default function SavedScreen({ savedJobs = [], onOpen, onSave, user }) {
         <View style={styles.itemFooter}>
           <View style={styles.locationContainer}>
             <Ionicons name="location-outline" size={12} color={Colors.muted} />
-            <Text style={styles.locationText}>{item.location}</Text>
+            <Text style={styles.locationText}>{item._distanceLabel}</Text>
           </View>
           
           {item.createdAt && (
@@ -134,7 +165,7 @@ export default function SavedScreen({ savedJobs = [], onOpen, onSave, user }) {
     <View style={{ flex: 1 }}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>
-          {items.length} saved item{items.length !== 1 ? 's' : ''}
+          {enrichedItems.length} saved item{enrichedItems.length !== 1 ? 's' : ''}
         </Text>
         <Text style={styles.headerSubtitle}>
           Jobs and accommodations you've saved
@@ -142,7 +173,7 @@ export default function SavedScreen({ savedJobs = [], onOpen, onSave, user }) {
       </View>
       
       <FlatList
-        data={items}
+        data={enrichedItems}
         keyExtractor={item => item.id}
         contentContainerStyle={styles.listContainer}
         renderItem={renderItem}

@@ -43,10 +43,13 @@ export default function App() {
       // normalize phone into id if provided
       const id = u.id || (u.phone ? u.phone.replace(/[^0-9]/g, '') : undefined);
       const data = { id, name: u.name || 'Anonymous', phone: u.phone };
-  setUser(data);
-  setAuthVisible(false);
-  setActiveTab('Jobs');
-  // after login, subscriptions will pick up saved items (useEffect below)
+      setUser(data);
+      setAuthVisible(false);
+      
+      // If user was on Post tab when they triggered login, stay there
+      // The PostScreen will automatically re-render with the new user data
+      
+      // after login, subscriptions will pick up saved items (useEffect below)
       // perform pending action if any
       if (pendingAction) {
         const p = pendingAction;
@@ -367,8 +370,8 @@ export default function App() {
 
           <View style={{ flex: 1, padding: 12 }}>
             {activeTab === 'Jobs' && <JobsScreen jobs={jobs} onOpenJob={openJob} onSaveJob={saveJob} savedIds={savedIds} userLocation={userLocation} />}
-            {activeTab === 'Saved' && <SavedScreen savedJobs={savedJobs} onOpen={openJob} onSave={saveJob} user={user} />}
-            {activeTab === 'Post' && <PostScreen onPost={postJob} />}
+            {activeTab === 'Saved' && <SavedScreen savedJobs={savedJobs} onOpen={openJob} onSave={saveJob} user={user} userLocation={userLocation} />}
+            {activeTab === 'Post' && <PostScreen onPost={postJob} onOpenAuth={() => setAuthVisible(true)} user={user} />}
             {activeTab === 'Map' && (
               <MapScreen
                 jobs={jobs.filter(j => j.kind === 'job')}
