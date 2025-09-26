@@ -1232,23 +1232,59 @@ export default function PostScreen({ onPost, onOpenAuth, user }) {
       </View>
 
       {durationEnabled && (
-        <View style={[shared.row, shared.mb16]}>
-          <TouchableOpacity 
-            onPress={() => setShowStartPicker(true)} 
-            style={[shared.smallButton, { marginRight: 8, flex: 1 }]}
-          >
-            <Text style={{ textAlign: 'center' }}>
-              {startDate ? startDate : 'Start Date'}
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
-            onPress={() => setShowEndPicker(true)} 
-            style={[shared.smallButton, { flex: 1 }]}
-          >
-            <Text style={{ textAlign: 'center' }}>
-              {endDate ? endDate : 'End Date'}
-            </Text>
-          </TouchableOpacity>
+        <View style={shared.mb16}>
+          <View style={[shared.row, { marginBottom: 8 }]}>
+            <TouchableOpacity 
+              onPress={() => setShowStartPicker(true)} 
+              style={[shared.smallButton, { marginRight: 8, flex: 1 }]}
+            >
+              <Text style={{ textAlign: 'center' }}>
+                {startDate ? startDate : 'Start Date'}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity 
+              onPress={() => setShowEndPicker(true)} 
+              style={[shared.smallButton, { flex: 1 }]}
+            >
+              <Text style={{ textAlign: 'center' }}>
+                {endDate ? endDate : 'End Date'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+          
+          {/* Start Date Picker - positioned right below start date button */}
+          {showStartPicker && (
+            <View style={{ marginBottom: 8 }}>
+              <DateTimePicker
+                value={startDate ? new Date(startDate) : new Date()}
+                mode="date"
+                display="default"
+                onChange={(e, d) => {
+                  setShowStartPicker(false);
+                  if (d) {
+                    setStartDate(d.toISOString().slice(0,10));
+                  }
+                }}
+              />
+            </View>
+          )}
+
+          {/* End Date Picker - positioned right below end date button */}
+          {showEndPicker && (
+            <View style={{ marginBottom: 8 }}>
+              <DateTimePicker
+                value={endDate ? new Date(endDate) : new Date()}
+                mode="date"
+                display="default"
+                onChange={(e, d) => {
+                  setShowEndPicker(false);
+                  if (d) {
+                    setEndDate(d.toISOString().slice(0,10));
+                  }
+                }}
+              />
+            </View>
+          )}
         </View>
       )}
 
@@ -1459,35 +1495,6 @@ export default function PostScreen({ onPost, onOpenAuth, user }) {
           </View>
         </View>
       </Modal>
-
-      {/* Date Pickers */}
-      {showStartPicker && (
-        <DateTimePicker
-          value={startDate ? new Date(startDate) : new Date()}
-          mode="date"
-          display="default"
-          onChange={(e, d) => {
-            setShowStartPicker(false);
-            if (d) {
-              setStartDate(d.toISOString().slice(0,10));
-            }
-          }}
-        />
-      )}
-
-      {showEndPicker && (
-        <DateTimePicker
-          value={endDate ? new Date(endDate) : new Date()}
-          mode="date"
-          display="default"
-          onChange={(e, d) => {
-            setShowEndPicker(false);
-            if (d) {
-              setEndDate(d.toISOString().slice(0,10));
-            }
-          }}
-        />
-      )}
 
       {/* My Posts Modal */}
       <Modal visible={showMyPosts} animationType="slide" presentationStyle="pageSheet">

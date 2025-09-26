@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { View, Text, TouchableOpacity, Alert, Modal, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, Alert, Modal, ActivityIndicator, Linking, Platform } from 'react-native';
 import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import AuthScreen from './components/AuthScreen';
@@ -11,6 +11,7 @@ import JobDetailModal from './components/JobDetailModal';
 import MapScreen from './components/MapScreen';
 import ErrorBoundary from './components/ErrorBoundary';
 import { Colors, shared } from './components/Theme';
+
 import Header from './components/Header';
 import * as Location from 'expo-location';
 import ProfileModal from './components/ProfileModal';
@@ -97,6 +98,66 @@ export default function App() {
     setDetailJob(job);
     setShowContact(!!(opts && opts.showContact));
   };
+
+  const openInMaps = (item) => {
+    if (!item || (!item.lat && !item.lng && !item.location)) {
+      Alert.alert('Location Not Available', 'This item does not have location data to show on maps.');
+      return;
+    }
+
+    const { lat, lng, location, title } = item;
+    
+    if (lat && lng) {
+      // Use coordinates if available
+      const label = encodeURIComponent(title || 'Location');
+      let url;
+      
+      if (Platform.OS === 'ios') {
+        // For iOS, use Apple Maps
+        url = `maps://app?daddr=${lat},${lng}&q=${label}`;
+      } else {
+        // For Android, use Google Maps
+        url = `geo:${lat},${lng}?q=${lat},${lng}(${label})`;
+      }
+
+      Linking.canOpenURL(url).then(supported => {
+        if (supported) {
+          Linking.openURL(url);
+        } else {
+          // Fallback to web-based maps
+          const webUrl = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
+          Linking.openURL(webUrl);
+        }
+      }).catch(err => {
+        console.error('Error opening maps:', err);
+        Alert.alert('Error', 'Unable to open maps application.');
+      });
+    } else if (location) {
+      // Use location name if coordinates not available
+      const query = encodeURIComponent(location);
+      let url;
+      
+      if (Platform.OS === 'ios') {
+        url = `maps://app?q=${query}`;
+      } else {
+        url = `geo:0,0?q=${query}`;
+      }
+
+      Linking.canOpenURL(url).then(supported => {
+        if (supported) {
+          Linking.openURL(url);
+        } else {
+          // Fallback to web-based maps
+          const webUrl = `https://www.google.com/maps/search/?api=1&query=${query}`;
+          Linking.openURL(webUrl);
+        }
+      }).catch(err => {
+        console.error('Error opening maps:', err);
+        Alert.alert('Error', 'Unable to open maps application.');
+      });
+    }
+  };
+
   const saveJob = async (job) => {
     if (!user || !user.id) {
       // prompt login/register modal and remember intent
@@ -492,7 +553,15 @@ export default function App() {
             </TouchableOpacity>
           </View>
 
-          <JobDetailModal visibleJob={detailJob} onClose={() => setDetailJob(null)} showContact={showContact} setShowContact={setShowContact} user={user} onDelete={deletePost} />
+          <JobDetailModal 
+            visibleJob={detailJob} 
+            onClose={() => setDetailJob(null)} 
+            showContact={showContact} 
+            setShowContact={setShowContact} 
+            user={user} 
+            onDelete={deletePost} 
+            onSeeOnMap={openInMaps}
+          />
           <ProfileModal visible={profileOpen} user={user} onClose={() => setProfileOpen(false)} onSave={(u) => { setUser(u); }} />
 
           <Modal visible={authVisible} animationType="slide" onRequestClose={() => setAuthVisible(false)}>

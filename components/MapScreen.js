@@ -53,6 +53,9 @@ export default function MapScreen({ jobs: propJobs = [], accommodations: propAcc
   }, []);
 
   function runSearch() {
+    console.log(`MapScreen runSearch - mode: ${mode}, accomFilter: ${accomFilter}, jobFilter: ${jobFilter}`);
+    console.log(`Available accommodations: ${accommodations.length}`);
+    
     let items = [];
 
     if (mode === 'jobs' || mode === 'all') {
@@ -61,17 +64,29 @@ export default function MapScreen({ jobs: propJobs = [], accommodations: propAcc
         if (jobFilter === 'full') return (j.type || '').toLowerCase().includes('full');
         return true;
       }).map(j => ({ ...j, _type: 'job' }));
+      console.log(`Found ${found.length} jobs after filtering`);
       items = items.concat(found);
     }
 
     if (mode === 'accommodations' || mode === 'all') {
       let found = (accommodations || []).map(a => ({ ...a, _type: 'accommodation' }));
+      console.log(`Initial accommodations before filtering: ${found.length}`);
+      
+      // Debug: log first few accommodations to see their availability field
+      found.slice(0, 3).forEach((acc, index) => {
+        console.log(`Accommodation ${index + 1}: ${acc.title}, availability: "${acc.availability}"`);
+      });
 
       if (mode === 'accommodations' && accomFilter === 'owned') {
-        found = found.filter(a => !!a.owner);
+        // Filter for "Whole" places (owned/private)
+        found = found.filter(a => a.availability === 'Whole');
+        console.log(`Found ${found.length} owned accommodations (availability === 'Whole')`);
       } else if (mode === 'accommodations' && accomFilter === 'shared') {
-        found = found.filter(a => a.shared === true);
+        // Filter for "Sharing" places
+        found = found.filter(a => a.availability === 'Sharing');
+        console.log(`Found ${found.length} shared accommodations (availability === 'Sharing')`);
       }
+      
 
       items = items.concat(found);
     }
@@ -80,6 +95,8 @@ export default function MapScreen({ jobs: propJobs = [], accommodations: propAcc
     const uniqueItems = items.filter((item, index, self) => 
       index === self.findIndex((t) => t.id === item.id && t._type === item._type)
     );
+
+    console.log(`Total unique items after filtering: ${uniqueItems.length}`);
 
     const withDist = uniqueItems.map(it => {
       if (userLocation && it.lat != null && it.lng != null) {
@@ -90,6 +107,7 @@ export default function MapScreen({ jobs: propJobs = [], accommodations: propAcc
     });
 
     const sorted = (userLocation) ? withDist.sort((a,b) => (a._distance || 1e9) - (b._distance || 1e9)) : withDist;
+    console.log(`Final sorted results: ${sorted.length}`);
     setResults(sorted);
     
     // Maintain selection if the selected item is still in results
@@ -116,6 +134,40 @@ export default function MapScreen({ jobs: propJobs = [], accommodations: propAcc
     const a = Math.sin(dLat/2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon/2) ** 2;
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
     return R * c;
+  }
+
+  function formatTimeAgo(createdAt) {
+    if (!createdAt) return '';
+    
+    try {
+      let date;
+      // Handle Firestore timestamp objects
+      if (typeof createdAt === 'object' && createdAt.toDate) {
+        date = createdAt.toDate();
+      } else {
+        date = new Date(createdAt);
+      }
+      
+      // Check if date is valid
+      if (isNaN(date.getTime())) return '';
+      
+      const now = new Date();
+      const diffInMinutes = Math.floor((now - date) / (1000 * 60));
+      
+      if (diffInMinutes < 1) return 'Just now';
+      if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
+      
+      const diffInHours = Math.floor(diffInMinutes / 60);
+      if (diffInHours < 24) return `${diffInHours}h ago`;
+      
+      const diffInDays = Math.floor(diffInHours / 24);
+      if (diffInDays < 7) return `${diffInDays}d ago`;
+      
+      const diffInWeeks = Math.floor(diffInDays / 7);
+      return `${diffInWeeks}w ago`;
+    } catch (error) {
+      return '';
+    }
   }
 
   function centerOn(item) {
@@ -331,6 +383,11 @@ export default function MapScreen({ jobs: propJobs = [], accommodations: propAcc
                       {r.salaryType === 'hourly' ? '/hr' : r.salaryType === 'daily' ? '/day' : '/week'}
                     </Text>
                   )}
+                  {formatTimeAgo(r.createdAt) && (
+                    <Text style={styles.calloutTime}>
+                      {formatTimeAgo(r.createdAt)}
+                    </Text>
+                  )}
                   <Text style={styles.calloutAction}>Tap for details →</Text>
                 </View>
               </Callout>
@@ -427,14 +484,27 @@ export default function MapScreen({ jobs: propJobs = [], accommodations: propAcc
                   }
                 </Text>
                 
-                <View style={styles.resultLocation}>
-                  <Ionicons name="location-outline" size={12} color={Colors.muted} />
-                  <Text style={styles.resultSub}>
-                    {item._distance != null ? 
-                      (item._distance < 1 ? `${Math.round(item._distance * 1000)} m` : `${item._distance.toFixed(1)} km`) : 
-                      (item.location || item.country || '')
-                    }
-                  </Text>
+                {/* Time and location row */}
+                <View style={styles.resultMetaRow}>
+                  <View style={styles.resultLocation}>
+                    <Ionicons name="location-outline" size={12} color={Colors.muted} />
+                    <Text style={styles.resultSub}>
+                      {item._distance != null ? 
+                        (item._distance < 1 ? `${Math.round(item._distance * 1000)} m` : `${item._distance.toFixed(1)} km`) : 
+                        (item.location || item.country || '')
+                      }
+                    </Text>
+                  </View>
+                  
+                  {/* Time display */}
+                  {formatTimeAgo(item.createdAt) && (
+                    <View style={styles.resultTime}>
+                      <Ionicons name="time-outline" size={12} color={Colors.muted} />
+                      <Text style={styles.resultSub}>
+                        {formatTimeAgo(item.createdAt)}
+                      </Text>
+                    </View>
+                  )}
                 </View>
               </TouchableOpacity>
             );
@@ -569,6 +639,11 @@ const styles = StyleSheet.create({
     color: Colors.primary,
     fontSize: 13,
     fontWeight: '600',
+    marginBottom: 4,
+  },
+  calloutTime: {
+    color: Colors.muted,
+    fontSize: 11,
     marginBottom: 6,
   },
   calloutAction: {
@@ -671,9 +746,21 @@ const styles = StyleSheet.create({
     color: Colors.primary,
     fontSize: 13,
     fontWeight: '600',
-    marginBottom: 6,
+    marginBottom: 8,
+  },
+  resultMetaRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    flexWrap: 'wrap',
   },
   resultLocation: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    marginRight: 8,
+  },
+  resultTime: {
     flexDirection: 'row',
     alignItems: 'center',
   },
