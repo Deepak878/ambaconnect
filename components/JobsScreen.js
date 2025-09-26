@@ -176,13 +176,16 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
     }
 
     // Apply sorting
-    return filtered.sort((a, b) => {
+    const sorted = filtered.sort((a, b) => {
       if (sortBy === 'distance') {
-        // Sort by distance (nearest to farthest)
+        // Sort by distance (nearest to farthest) - ascending order
         if (a._distanceKm == null && b._distanceKm == null) return 0;
-        if (a._distanceKm == null) return 1;
-        if (b._distanceKm == null) return -1;
-        return a._distanceKm - b._distanceKm;
+        if (a._distanceKm == null) return 1; // Items without distance go to end
+        if (b._distanceKm == null) return -1; // Items with distance come first
+        
+        // Ascending order: nearest (smallest distance) first
+        const diff = a._distanceKm - b._distanceKm;
+        return diff;
       } else {
         // Sort by time (latest to oldest) - optimized date parsing
         try {
@@ -202,6 +205,16 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
         }
       }
     });
+
+    // Debug logging for distance sorting
+    if (sortBy === 'distance' && sorted.length > 0) {
+      console.log('Distance sorting results:');
+      sorted.slice(0, 5).forEach((item, index) => {
+        console.log(`${index + 1}. ${item.title} - ${item._distanceKm ? item._distanceKm.toFixed(2) + ' km' : 'No location'}`);
+      });
+    }
+
+    return sorted;
   }, [enrichedJobs, debouncedQuery, partTimeOnly, filterKind, sortBy, searchJobs, selectedDays, accommodationType]);
 
   // Create display data with refreshing card when pulling to refresh
@@ -243,6 +256,16 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
           const uniqueJobs = allJobs.filter((job, index, self) => 
             index === self.findIndex(j => j.id === job.id)
           );
+
+          // Debug logging for cached data to check createdAt field
+          console.log('Cached data load - checking createdAt fields:');
+          uniqueJobs.slice(0, 3).forEach((job, index) => {
+            console.log(`Cached Job ${index + 1}: ${job.title}`);
+            console.log(`  - createdAt:`, job.createdAt);
+            console.log(`  - createdAt type:`, typeof job.createdAt);
+            console.log(`  - createdAt has toDate:`, job.createdAt && typeof job.createdAt.toDate === 'function');
+          });
+
           setJobs(uniqueJobs);
           setLoading(false);
           
@@ -279,11 +302,14 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
       );
       
       const jobsSnapshot = await getDocs(jobsQuery);
-      const jobsData = jobsSnapshot.docs.map(d => ({ 
-        id: d.id, 
-        kind: 'job',
-        ...d.data() 
-      }));
+      const jobsData = jobsSnapshot.docs.map(d => {
+        const data = d.data();
+        return { 
+          id: d.id, 
+          kind: 'job',
+          ...data
+        };
+      });
       
       // Load accommodations
       const accommodationsQuery = fsQuery(
@@ -293,17 +319,30 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
       );
       
       const accommodationsSnapshot = await getDocs(accommodationsQuery);
-      const accommodationsData = accommodationsSnapshot.docs.map(d => ({ 
-        id: d.id, 
-        kind: 'accommodation',
-        ...d.data() 
-      }));
+      const accommodationsData = accommodationsSnapshot.docs.map(d => {
+        const data = d.data();
+        return { 
+          id: d.id, 
+          kind: 'accommodation',
+          ...data
+        };
+      });
 
       // Combine and set jobs - deduplicate by ID
       const allJobs = [...jobsData, ...accommodationsData];
       const uniqueJobs = allJobs.filter((job, index, self) => 
         index === self.findIndex(j => j.id === job.id)
       );
+
+      // Debug logging for initial load to check createdAt field
+      console.log('Initial network load - checking createdAt fields:');
+      uniqueJobs.slice(0, 3).forEach((job, index) => {
+        console.log(`Job ${index + 1}: ${job.title}`);
+        console.log(`  - createdAt:`, job.createdAt);
+        console.log(`  - createdAt type:`, typeof job.createdAt);
+        console.log(`  - createdAt has toDate:`, job.createdAt && typeof job.createdAt.toDate === 'function');
+      });
+
       setJobs(uniqueJobs);
 
       // Update pagination state
@@ -557,6 +596,38 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
           }]}
         >
           <Text style={{ color: filterKind==='accommodation'?Colors.card:Colors.muted }}>Accommodation</Text>
+        </TouchableOpacity>
+        
+        <View style={{ flex: 1 }} />
+        
+        {/* Sort Button */}
+        <TouchableOpacity 
+          onPress={() => setSortBy(sortBy === 'distance' ? 'time' : 'distance')}
+          style={[
+            shared.smallButton, 
+            { 
+              backgroundColor: Colors.primary, 
+              borderColor: Colors.primary,
+              flexDirection: 'row',
+              alignItems: 'center',
+              paddingHorizontal: 12,
+              minWidth: 80,
+            }
+          ]}
+        >
+          <Ionicons 
+            name={sortBy === 'distance' ? 'location-outline' : 'time-outline'} 
+            size={14} 
+            color={Colors.card}
+            style={{ marginRight: 6 }}
+          />
+          <Text style={{ 
+            color: Colors.card, 
+            fontSize: 12, 
+            fontWeight: '600' 
+          }}>
+            {sortBy === 'distance' ? 'Nearest' : 'Recent'}
+          </Text>
         </TouchableOpacity>
       </View>
 

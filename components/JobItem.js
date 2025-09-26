@@ -53,7 +53,10 @@ const JobItem = memo(({ item, onOpen, onSave, saved, userLocation }) => {
 
   // Memoize time ago calculation
   const timeAgoText = useMemo(() => {
-    if (!item.createdAt) return '';
+    if (!item.createdAt) {
+      console.log(`No createdAt for item: ${item.title}`);
+      return '';
+    }
     
     try {
       let date;
@@ -61,12 +64,15 @@ const JobItem = memo(({ item, onOpen, onSave, saved, userLocation }) => {
       // Handle Firestore timestamp objects
       if (typeof item.createdAt === 'object' && item.createdAt.toDate) {
         date = item.createdAt.toDate();
+        console.log(`Firestore timestamp for ${item.title}:`, date);
       } else {
         date = new Date(item.createdAt);
+        console.log(`Regular date for ${item.title}:`, date);
       }
       
       // Check if date is valid
       if (isNaN(date.getTime())) {
+        console.log(`Invalid date for ${item.title}:`, item.createdAt);
         return '';
       }
       
@@ -85,6 +91,7 @@ const JobItem = memo(({ item, onOpen, onSave, saved, userLocation }) => {
       const diffInWeeks = Math.floor(diffInDays / 7);
       return `${diffInWeeks}w ago`;
     } catch (error) {
+      console.log(`Error calculating time for ${item.title}:`, error);
       return '';
     }
   }, [item.createdAt]);
