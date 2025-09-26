@@ -15,7 +15,19 @@ import Header from './components/Header';
 import * as Location from 'expo-location';
 import ProfileModal from './components/ProfileModal';
 import { db } from './firebaseConfig';
-import { doc, setDoc, deleteDoc, serverTimestamp, collection, query as fsQuery, where, onSnapshot, getDoc } from 'firebase/firestore';
+import { 
+  doc, 
+  setDoc, 
+  deleteDoc, 
+  serverTimestamp, 
+  collection, 
+  query as fsQuery, 
+  where, 
+  onSnapshot, 
+  getDoc,
+  orderBy,
+  addDoc
+} from 'firebase/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function App() {
@@ -167,61 +179,70 @@ export default function App() {
   };
   const savedJobs = jobs.filter(j => savedIds.includes(String(j.id)));
 
-  // Firestore connection setup function
+  // Optimized Firestore connection setup function
   const setupFirestoreListeners = () => {
-    let unsubJobs = null;
-    let unsubAccommodations = null;
-    
     try {
       setIsConnecting(true);
       setConnectionError(null);
       
-      // Load jobs from Firestore 'jobs' collection
-      const jobsQuery = fsQuery(collection(db, 'jobs'));
-      unsubJobs = onSnapshot(jobsQuery, (snapshot) => {
+      // Use a single optimized query for better performance
+      const jobsQuery = fsQuery(
+        collection(db, 'jobs'), 
+        orderBy('createdAt', 'desc')
+      );
+      
+      const accommodationsQuery = fsQuery(
+        collection(db, 'accommodations'), 
+        orderBy('createdAt', 'desc')
+      );
+
+      const unsubJobs = onSnapshot(jobsQuery, (snapshot) => {
         const firestoreJobs = snapshot.docs.map(doc => ({
-          id: doc.id, // Use Firestore document ID
+          id: doc.id,
           kind: 'job',
           ...doc.data()
         }));
         
-        // Load accommodations from Firestore 'accommodations' collection
-        const accommodationsQuery = fsQuery(collection(db, 'accommodations'));
-        unsubAccommodations = onSnapshot(accommodationsQuery, (accomSnapshot) => {
-          const firestoreAccommodations = accomSnapshot.docs.map(doc => ({
-            id: doc.id, // Use Firestore document ID
-            kind: 'accommodation',
-            ...doc.data()
-          }));
-          
-          // Combine both jobs and accommodations
-          const allJobs = [...firestoreJobs, ...firestoreAccommodations];
-          setJobs(allJobs);
-          setIsConnecting(false);
-          setConnectionError(null);
-        }, (error) => {
-          console.error('Accommodations listener error:', error);
-          setConnectionError('Failed to load accommodations');
-          // Keep existing jobs on accommodation error, only update jobs part
-          setJobs(prev => prev.filter(j => j.kind === 'job').concat(firestoreJobs));
-          setIsConnecting(false);
+        // Update jobs in a batch to prevent multiple re-renders
+        setJobs(prevJobs => {
+          const accommodations = prevJobs.filter(j => j.kind === 'accommodation');
+          return [...firestoreJobs, ...accommodations];
         });
+        
+        setIsConnecting(false);
+        setConnectionError(null);
       }, (error) => {
         console.error('Jobs listener error:', error);
         setIsConnecting(false);
-        setConnectionError('Failed to connect to Firestore. Retrying...');
-        // Retry after 5 seconds
+        setConnectionError('Failed to connect to jobs. Retrying...');
         setTimeout(setupFirestoreListeners, 5000);
       });
+
+      const unsubAccommodations = onSnapshot(accommodationsQuery, (accomSnapshot) => {
+        const firestoreAccommodations = accomSnapshot.docs.map(doc => ({
+          id: doc.id,
+          kind: 'accommodation',
+          ...doc.data()
+        }));
+        
+        // Update accommodations in a batch
+        setJobs(prevJobs => {
+          const jobs = prevJobs.filter(j => j.kind === 'job');
+          return [...jobs, ...firestoreAccommodations];
+        });
+      }, (error) => {
+        console.error('Accommodations listener error:', error);
+        setConnectionError('Failed to load accommodations');
+      });
+
+      return { unsubJobs, unsubAccommodations };
     } catch (error) {
       console.error('Failed to setup Firestore listeners:', error);
       setIsConnecting(false);
       setConnectionError('Connection failed. Retrying...');
-      // Retry after 10 seconds
       setTimeout(setupFirestoreListeners, 10000);
+      return { unsubJobs: null, unsubAccommodations: null };
     }
-
-    return { unsubJobs, unsubAccommodations };
   };
 
   useEffect(() => {

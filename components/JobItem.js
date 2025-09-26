@@ -1,65 +1,76 @@
-import React from 'react';
+import React, { memo, useMemo } from 'react';
 import { View, Text, Image, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { shared, Colors } from './Theme';
 import OptimizedImage from './OptimizedImage';
 const placeholder = require('../assets/icon.png');
 
+// Cached distance calculation to prevent recalculation
+const distanceCache = new Map();
 const toRad = (deg) => deg * Math.PI / 180;
 const haversineKm = (lat1, lon1, lat2, lon2) => {
+  const key = `${lat1},${lon1},${lat2},${lon2}`;
+  if (distanceCache.has(key)) {
+    return distanceCache.get(key);
+  }
+  
   const R = 6371; // km
   const dLat = toRad(lat2 - lat1);
   const dLon = toRad(lon2 - lon1);
   const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon/2) * Math.sin(dLon/2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-  return R * c;
+  const distance = R * c;
+  
+  distanceCache.set(key, distance);
+  if (distanceCache.size > 500) {
+    const firstKey = distanceCache.keys().next().value;
+    distanceCache.delete(firstKey);
+  }
+  
+  return distance;
 };
 
-export default function JobItem({ item, onOpen, onSave, saved, userLocation }) {
-  const primaryImage = (item.images && item.images.length && item.images[0]) || item.image || placeholder;
-  let distanceLabel = item.location || '';
-  if (userLocation && item.lat && item.lng) {
-    try {
-      const km = haversineKm(userLocation.latitude, userLocation.longitude, item.lat, item.lng);
-      if (!isNaN(km)) {
-        distanceLabel = km < 1 ? `${Math.round(km*1000)} m away` : `${km.toFixed(1)} km away`;
-      }
-    } catch (e) {}
-  }
+const JobItem = memo(({ item, onOpen, onSave, saved, userLocation }) => {
+  // Memoize distance calculation
+  const distanceLabel = useMemo(() => {
+    if (item._distanceKm !== undefined && item._distanceKm !== null) {
+      return item._distanceKm < 1 
+        ? `${Math.round(item._distanceKm * 1000)} m away` 
+        : `${item._distanceKm.toFixed(1)} km away`;
+    }
+    
+    if (userLocation && item.lat && item.lng) {
+      try {
+        const km = haversineKm(userLocation.latitude, userLocation.longitude, item.lat, item.lng);
+        if (!isNaN(km)) {
+          return km < 1 ? `${Math.round(km*1000)} m away` : `${km.toFixed(1)} km away`;
+        }
+      } catch (e) {}
+    }
+    
+    return item.location || '';
+  }, [item.location, item.lat, item.lng, item._distanceKm, userLocation]);
 
-  const getJobCategory = (title) => {
-    const titleLower = (title || '').toLowerCase();
-    if (titleLower.includes('barista') || titleLower.includes('cafe') || titleLower.includes('restaurant')) return 'cafe';
-    if (titleLower.includes('warehouse') || titleLower.includes('helper')) return 'cube';
-    if (titleLower.includes('dog') || titleLower.includes('pet')) return 'paw';
-    if (titleLower.includes('baby') || titleLower.includes('child')) return 'person';
-    if (titleLower.includes('delivery') || titleLower.includes('driver')) return 'car';
-    if (titleLower.includes('retail') || titleLower.includes('shop')) return 'storefront';
-    if (titleLower.includes('tech') || titleLower.includes('support')) return 'laptop';
-    if (titleLower.includes('clean')) return 'sparkles';
-    return 'briefcase';
-  };
-
-  const getTimeAgo = (dateInput) => {
-    if (!dateInput) return '';
+  // Memoize time ago calculation
+  const timeAgoText = useMemo(() => {
+    if (!item.createdAt) return '';
     
     try {
       let date;
       
-      // Handle Firestore timestamp objects (same logic as JobDetailModal)
-      if (typeof dateInput === 'object' && dateInput.toDate) {
-        date = dateInput.toDate();
+      // Handle Firestore timestamp objects
+      if (typeof item.createdAt === 'object' && item.createdAt.toDate) {
+        date = item.createdAt.toDate();
       } else {
-        date = new Date(dateInput);
+        date = new Date(item.createdAt);
       }
-      
-      const now = new Date();
       
       // Check if date is valid
       if (isNaN(date.getTime())) {
         return '';
       }
       
+      const now = new Date();
       const diffInMinutes = Math.floor((now - date) / (1000 * 60));
       
       if (diffInMinutes < 1) return 'Just now';
@@ -74,10 +85,23 @@ export default function JobItem({ item, onOpen, onSave, saved, userLocation }) {
       const diffInWeeks = Math.floor(diffInDays / 7);
       return `${diffInWeeks}w ago`;
     } catch (error) {
-      console.warn('Error parsing date:', dateInput, error);
       return '';
     }
-  };
+  }, [item.createdAt]);
+
+  // Memoize category icon
+  const categoryIcon = useMemo(() => {
+    const titleLower = (item.title || '').toLowerCase();
+    if (titleLower.includes('barista') || titleLower.includes('cafe') || titleLower.includes('restaurant')) return 'cafe';
+    if (titleLower.includes('warehouse') || titleLower.includes('helper')) return 'cube';
+    if (titleLower.includes('dog') || titleLower.includes('pet')) return 'paw';
+    if (titleLower.includes('baby') || titleLower.includes('child')) return 'person';
+    if (titleLower.includes('delivery') || titleLower.includes('driver')) return 'car';
+    if (titleLower.includes('retail') || titleLower.includes('shop')) return 'storefront';
+    if (titleLower.includes('tech') || titleLower.includes('support')) return 'laptop';
+    if (titleLower.includes('clean')) return 'sparkles';
+    return 'briefcase';
+  }, [item.title]);
 
   return (
     <TouchableOpacity style={[shared.card, styles.jobCard]} onPress={() => onOpen(item)}>
@@ -86,7 +110,7 @@ export default function JobItem({ item, onOpen, onSave, saved, userLocation }) {
         <View style={styles.cardHeader}>
           <View style={styles.titleContainer}>
             <Text style={styles.jobTitle} numberOfLines={2}>{item.title}</Text>
-            <Text style={styles.timeAgo}>{getTimeAgo(item.createdAt)}</Text>
+            <Text style={styles.timeAgo}>{timeAgoText}</Text>
           </View>
           <View style={styles.rightActions}>
             <TouchableOpacity style={styles.typeButton}>
@@ -150,7 +174,9 @@ export default function JobItem({ item, onOpen, onSave, saved, userLocation }) {
       </View>
     </TouchableOpacity>
   );
-}
+});
+
+export default JobItem;
 
 const styles = StyleSheet.create({
   jobCard: { 
