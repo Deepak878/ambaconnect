@@ -55,7 +55,7 @@ const JobItem = memo(({ item, onOpen, onSave, saved, userLocation }) => {
   const timeAgoText = useMemo(() => {
     if (!item.createdAt) {
       console.log(`No createdAt for item: ${item.title}`);
-      return '';
+      return 'Recently posted'; // Fallback text instead of empty string
     }
     
     try {
@@ -65,19 +65,28 @@ const JobItem = memo(({ item, onOpen, onSave, saved, userLocation }) => {
       if (typeof item.createdAt === 'object' && item.createdAt.toDate) {
         date = item.createdAt.toDate();
         console.log(`Firestore timestamp for ${item.title}:`, date);
-      } else {
+      } else if (typeof item.createdAt === 'object' && item.createdAt.seconds) {
+        // Handle Firestore timestamp in seconds format
+        date = new Date(item.createdAt.seconds * 1000);
+        console.log(`Firestore seconds timestamp for ${item.title}:`, date);
+      } else if (typeof item.createdAt === 'string' || typeof item.createdAt === 'number') {
         date = new Date(item.createdAt);
-        console.log(`Regular date for ${item.title}:`, date);
+        console.log(`String/Number date for ${item.title}:`, date);
+      } else {
+        console.log(`Unknown createdAt format for ${item.title}:`, item.createdAt);
+        return 'Recently posted';
       }
       
       // Check if date is valid
       if (isNaN(date.getTime())) {
         console.log(`Invalid date for ${item.title}:`, item.createdAt);
-        return '';
+        return 'Recently posted';
       }
       
       const now = new Date();
       const diffInMinutes = Math.floor((now - date) / (1000 * 60));
+      
+      console.log(`Time diff for ${item.title}: ${diffInMinutes} minutes`);
       
       if (diffInMinutes < 1) return 'Just now';
       if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
@@ -89,12 +98,15 @@ const JobItem = memo(({ item, onOpen, onSave, saved, userLocation }) => {
       if (diffInDays < 7) return `${diffInDays}d ago`;
       
       const diffInWeeks = Math.floor(diffInDays / 7);
-      return `${diffInWeeks}w ago`;
+      if (diffInWeeks < 4) return `${diffInWeeks}w ago`;
+      
+      const diffInMonths = Math.floor(diffInDays / 30);
+      return `${diffInMonths}mo ago`;
     } catch (error) {
       console.log(`Error calculating time for ${item.title}:`, error);
-      return '';
+      return 'Recently posted';
     }
-  }, [item.createdAt]);
+  }, [item.createdAt, item.title]);
 
   // Memoize category icon
   const categoryIcon = useMemo(() => {
@@ -117,7 +129,6 @@ const JobItem = memo(({ item, onOpen, onSave, saved, userLocation }) => {
         <View style={styles.cardHeader}>
           <View style={styles.titleContainer}>
             <Text style={styles.jobTitle} numberOfLines={2}>{item.title}</Text>
-            <Text style={styles.timeAgo}>{timeAgoText}</Text>
           </View>
           <View style={styles.rightActions}>
             <TouchableOpacity style={styles.typeButton}>
@@ -162,10 +173,16 @@ const JobItem = memo(({ item, onOpen, onSave, saved, userLocation }) => {
           </View>
         )}
 
-        {/* Location */}
-        <View style={styles.locationRow}>
-          <Ionicons name="location-outline" size={12} color={Colors.muted} />
-          <Text style={styles.locationText}>{distanceLabel}</Text>
+        {/* Location and time info row - Always show both */}
+        <View style={styles.metaRow}>
+          <View style={styles.locationRow}>
+            <Ionicons name="location-outline" size={12} color={Colors.muted} />
+            <Text style={styles.locationText}>{distanceLabel || item.location || 'Location not specified'}</Text>
+          </View>
+          <View style={styles.timeRow}>
+            <Ionicons name="time-outline" size={12} color={Colors.muted} />
+            <Text style={styles.timeText}>{timeAgoText}</Text>
+          </View>
         </View>
 
         {/* Tags/Keywords if available */}
@@ -262,15 +279,32 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: Colors.muted,
   },
+  metaRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
   locationRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 6,
+    flex: 1,
   },
   locationText: {
     fontSize: 12,
     color: Colors.muted,
     marginLeft: 4,
+  },
+  timeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: 12,
+  },
+  timeText: {
+    fontSize: 12,
+    color: Colors.muted,
+    marginLeft: 4,
+    fontWeight: '500',
   },
   tagsContainer: {
     flexDirection: 'row',

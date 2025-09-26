@@ -19,27 +19,8 @@ import { ListSkeleton } from './SkeletonLoader';
 import { useDebouncedSearch } from '../hooks';
 import { dataCache } from '../utils/dataCache';
 
-// Performance optimized distance calculatio          {/* Apply Button */}
-          <View style={{ padding: 16 }}>
-            <TouchableOpacity
-              onPress={() => setShowFilterModal(false)}
-              style={[
-                shared.primaryButton,
-                { backgroundColor: Colors.primary }
-              ]}
-            >
-              <Text style={{ color: Colors.card, fontWeight: '600', textAlign: 'center' }}>
-                Apply Filters
-              </Text>
-            </TouchableOpacity>
-          </View>
-//         </SafeAreaView>
-//       </Modal>
-//     </View>
-//   );
-// }
-
 // Performance optimized distance calculation with memoization
+const distanceCache = new Map();
 const toRad = (deg) => deg * Math.PI / 180;
 const haversineKm = (lat1, lon1, lat2, lon2) => {
   const key = `${lat1},${lon1},${lat2},${lon2}`;
@@ -68,7 +49,7 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
   const [query, setQuery] = useState('');
   const [partTimeOnly, setPartTimeOnly] = useState(filters?.partTimeOnly || false);
   const [filterKind, setFilterKind] = useState('all'); // 'all' | 'job' | 'accommodation'
-  const [sortBy, setSortBy] = useState('distance'); // 'distance' | 'time'
+  const [sortBy, setSortBy] = useState(userLocation ? 'distance' : 'time'); // 'distance' | 'time' - default to distance if location available
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -86,24 +67,44 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
   
   // Use debounced search for better performance
   const debouncedQuery = useDebouncedSearch(query, 300);
+  
+  // Handle sort toggle with debugging
+  const handleSortToggle = useCallback(() => {
+    const newSortBy = sortBy === 'distance' ? 'time' : 'distance';
+    console.log(`Sort button clicked: ${sortBy} -> ${newSortBy}`);
+    setSortBy(newSortBy);
+  }, [sortBy]);
 
   // Memoized job enrichment with distance calculations
   const enrichedJobs = useMemo(() => {
-    if (!userLocation) return jobs;
+    console.log(`Enriching jobs: ${jobs.length} jobs, userLocation:`, userLocation ? 'available' : 'not available');
     
-    return jobs.map(j => {
+    if (!userLocation) {
+      console.log('No user location, returning jobs without distance calculation');
+      // Still return jobs but with _distanceKm set to null for consistency
+      return jobs.map(j => ({ ...j, _distanceKm: null }));
+    }
+    
+    const enriched = jobs.map(j => {
       if (j._distanceKm !== undefined) return j; // Already calculated
       
       let distance = null;
       if (j.lat && j.lng) {
         try { 
           distance = haversineKm(userLocation.latitude, userLocation.longitude, j.lat, j.lng); 
+          console.log(`Distance calculated for ${j.title}: ${distance.toFixed(2)} km`);
         } catch (e) { 
+          console.log(`Error calculating distance for ${j.title}:`, e);
           distance = null; 
         }
+      } else {
+        console.log(`No lat/lng for job: ${j.title}`);
       }
       return { ...j, _distanceKm: distance };
     });
+    
+    console.log(`Enriched ${enriched.length} jobs, ${enriched.filter(j => j._distanceKm !== null).length} with valid distances`);
+    return enriched;
   }, [jobs, userLocation]);
 
   // Optimized search function with debouncing
@@ -178,16 +179,47 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
     // Apply sorting
     const sorted = filtered.sort((a, b) => {
       if (sortBy === 'distance') {
+        // If no user location is available, fall back to time sorting
+        if (!userLocation) {
+          try {
+            const getDateValue = (item) => {
+              if (!item.createdAt) return 0;
+              if (typeof item.createdAt === 'object' && item.createdAt.toDate) {
+                return item.createdAt.toDate().getTime();
+              }
+              const date = new Date(item.createdAt);
+              return isNaN(date.getTime()) ? 0 : date.getTime();
+            };
+            return getDateValue(b) - getDateValue(a); // Latest first when no location
+          } catch (error) {
+            return 0;
+          }
+        }
+        
         // Sort by distance (nearest to farthest) - ascending order
-        if (a._distanceKm == null && b._distanceKm == null) return 0;
+        if (a._distanceKm == null && b._distanceKm == null) {
+          // If both items don't have distance, sort by time (recent first) as secondary sort
+          try {
+            const getDateValue = (item) => {
+              if (!item.createdAt) return 0;
+              if (typeof item.createdAt === 'object' && item.createdAt.toDate) {
+                return item.createdAt.toDate().getTime();
+              }
+              const date = new Date(item.createdAt);
+              return isNaN(date.getTime()) ? 0 : date.getTime();
+            };
+            return getDateValue(b) - getDateValue(a); // Latest first for items without distance
+          } catch (error) {
+            return 0;
+          }
+        }
         if (a._distanceKm == null) return 1; // Items without distance go to end
         if (b._distanceKm == null) return -1; // Items with distance come first
         
         // Ascending order: nearest (smallest distance) first
-        const diff = a._distanceKm - b._distanceKm;
-        return diff;
+        return a._distanceKm - b._distanceKm;
       } else {
-        // Sort by time (latest to oldest) - optimized date parsing
+        // Sort by time (latest to oldest) - recent posts first
         try {
           const getDateValue = (item) => {
             if (!item.createdAt) return 0;
@@ -198,7 +230,7 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
             return isNaN(date.getTime()) ? 0 : date.getTime();
           };
           
-          return getDateValue(b) - getDateValue(a); // Latest first
+          return getDateValue(b) - getDateValue(a); // Latest first (most recent)
         } catch (error) {
           console.warn('Error sorting by time:', error);
           return 0;
@@ -206,16 +238,42 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
       }
     });
 
-    // Debug logging for distance sorting
+    // Debug logging for sorting results
+    console.log(`Current sort by: ${sortBy}, filtered jobs count: ${filtered.length}`);
     if (sortBy === 'distance' && sorted.length > 0) {
-      console.log('Distance sorting results:');
+      console.log('Distance sorting results (nearest first):');
       sorted.slice(0, 5).forEach((item, index) => {
-        console.log(`${index + 1}. ${item.title} - ${item._distanceKm ? item._distanceKm.toFixed(2) + ' km' : 'No location'}`);
+        console.log(`${index + 1}. ${item.title} - ${item._distanceKm ? item._distanceKm.toFixed(2) + ' km' : 'No location data'}`);
+      });
+    } else if (sortBy === 'time' && sorted.length > 0) {
+      console.log('Time sorting results (most recent first):');
+      sorted.slice(0, 5).forEach((item, index) => {
+        let timeStr = 'No time';
+        if (item.createdAt) {
+          try {
+            let date;
+            if (typeof item.createdAt === 'object' && item.createdAt.toDate) {
+              date = item.createdAt.toDate();
+            } else {
+              date = new Date(item.createdAt);
+            }
+            if (!isNaN(date.getTime())) {
+              const now = new Date();
+              const diffInMinutes = Math.floor((now - date) / (1000 * 60));
+              if (diffInMinutes < 60) timeStr = `${diffInMinutes}m ago`;
+              else if (diffInMinutes < 1440) timeStr = `${Math.floor(diffInMinutes / 60)}h ago`;
+              else timeStr = `${Math.floor(diffInMinutes / 1440)}d ago`;
+            }
+          } catch (e) {
+            timeStr = 'Invalid time';
+          }
+        }
+        console.log(`${index + 1}. ${item.title} - ${timeStr}`);
       });
     }
 
     return sorted;
-  }, [enrichedJobs, debouncedQuery, partTimeOnly, filterKind, sortBy, searchJobs, selectedDays, accommodationType]);
+  }, [enrichedJobs, debouncedQuery, partTimeOnly, filterKind, sortBy, searchJobs, selectedDays, accommodationType, userLocation]);
 
   // Create display data with refreshing card when pulling to refresh
   const displayData = useMemo(() => {
@@ -304,6 +362,7 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
       const jobsSnapshot = await getDocs(jobsQuery);
       const jobsData = jobsSnapshot.docs.map(d => {
         const data = d.data();
+        console.log(`Job loaded: ${data.title}, lat: ${data.lat}, lng: ${data.lng}, createdAt: ${data.createdAt}`);
         return { 
           id: d.id, 
           kind: 'job',
@@ -321,6 +380,7 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
       const accommodationsSnapshot = await getDocs(accommodationsQuery);
       const accommodationsData = accommodationsSnapshot.docs.map(d => {
         const data = d.data();
+        console.log(`Accommodation loaded: ${data.title}, lat: ${data.lat}, lng: ${data.lng}, createdAt: ${data.createdAt}`);
         return { 
           id: d.id, 
           kind: 'accommodation',
@@ -600,9 +660,9 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
         
         <View style={{ flex: 1 }} />
         
-        {/* Sort Button */}
+        {/* Sort Button with better visual feedback */}
         <TouchableOpacity 
-          onPress={() => setSortBy(sortBy === 'distance' ? 'time' : 'distance')}
+          onPress={handleSortToggle}
           style={[
             shared.smallButton, 
             { 
@@ -612,6 +672,7 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
               alignItems: 'center',
               paddingHorizontal: 12,
               minWidth: 80,
+              opacity: (sortBy === 'distance' && !userLocation) ? 0.6 : 1,
             }
           ]}
         >
@@ -626,10 +687,19 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
             fontSize: 12, 
             fontWeight: '600' 
           }}>
-            {sortBy === 'distance' ? 'Nearest' : 'Recent'}
+            {sortBy === 'distance' ? (userLocation ? 'Nearest' : 'Recent*') : 'Recent'}
           </Text>
         </TouchableOpacity>
       </View>
+
+      {/* Location info message */}
+      {sortBy === 'distance' && !userLocation && (
+        <View style={{ paddingHorizontal: 12, paddingBottom: 8 }}>
+          <Text style={{ fontSize: 11, color: Colors.muted, textAlign: 'center' }}>
+            * Enable location permission for distance-based sorting
+          </Text>
+        </View>
+      )}
 
       {/* Performance indicator */}
       {loading ? (
