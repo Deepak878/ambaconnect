@@ -348,7 +348,7 @@ export default function App() {
       <SafeAreaProvider>
         <SafeAreaView style={shared.container}>
           <Header
-            title="AmbaConnect"
+            title="GenZ"
             onProfile={() => setProfileOpen(true)}
             user={user}
             onBack={detailJob ? (() => setDetailJob(null)) : (activeTab !== 'Jobs' ? (() => setActiveTab('Jobs')) : null)}

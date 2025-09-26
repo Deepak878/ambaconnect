@@ -315,7 +315,12 @@ export default function MapScreen({ jobs: propJobs = [], accommodations: propAcc
                     />
                     <Text style={styles.calloutTitle}>{r.name || r.title}</Text>
                   </View>
-                  <Text style={styles.calloutLocation}>{r.location || r.country || ''}</Text>
+                  <Text style={styles.calloutLocation}>
+                    {r._distance != null ? 
+                      (r._distance < 1 ? `${Math.round(r._distance * 1000)} m away` : `${r._distance.toFixed(1)} km away`) : 
+                      (r.location || r.country || '')
+                    }
+                  </Text>
                   {isAccommodation ? (
                     <Text style={styles.calloutPrice}>
                       {r.rent} {r.currency || 'USD'}/month
