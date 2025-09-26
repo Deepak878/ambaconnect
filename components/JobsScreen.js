@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { View, TextInput, TouchableOpacity, Text, FlatList } from 'react-native';
+import { View, TextInput, TouchableOpacity, Text, FlatList, RefreshControl } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { db } from '../firebaseConfig';
 import { 
@@ -8,12 +8,15 @@ import {
   orderBy, 
   onSnapshot, 
   limit, 
-  startAfter 
+  startAfter,
+  getDocs
 } from 'firebase/firestore';
 import JobItem from './JobItem';
+import RefreshingCard from './RefreshingCard';
 import { Colors, shared } from './Theme';
 import { ListSkeleton } from './SkeletonLoader';
 import { useDebouncedSearch } from '../hooks';
+import { dataCache } from '../utils/dataCache';
 
 // Performance optimized distance calculation with memoization
 const distanceCache = new Map();
@@ -48,11 +51,12 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
   const [sortBy, setSortBy] = useState('distance'); // 'distance' | 'time'
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(true);
-  const [lastVisible, setLastVisible] = useState(null);
+  const [hasMore, setHasMore] = useState({ jobs: true, accommodations: true });
+  const [lastVisible, setLastVisible] = useState({ jobs: null, accommodations: null });
   
-  const BATCH_SIZE = 20; // Load jobs in batches for better performance
+  const BATCH_SIZE = 10; // Smaller batch size for better initial load performance
   
   // Use debounced search for better performance
   const debouncedQuery = useDebouncedSearch(query, 300);
@@ -132,6 +136,20 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
     });
   }, [enrichedJobs, debouncedQuery, partTimeOnly, filterKind, sortBy, searchJobs]);
 
+  // Create display data with refreshing card when pulling to refresh
+  const displayData = useMemo(() => {
+    // If refreshing and we have existing data, show refreshing card first
+    if (refreshing && filteredAndSortedJobs.length > 0) {
+      return [
+        { id: '__refreshing__', isRefreshingCard: true }, // Special marker for refreshing card
+        ...filteredAndSortedJobs
+      ];
+    }
+    
+    // Otherwise just show the normal filtered data
+    return filteredAndSortedJobs;
+  }, [refreshing, filteredAndSortedJobs]);
+
   // Remove the old debounced query effect since we're using the hook
   // useEffect(() => {
   //   const timeoutId = setTimeout(() => {
@@ -141,111 +159,256 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
   //   return () => clearTimeout(timeoutId);
   // }, [query]);
 
-  // Optimized Firestore subscriptions
-  useEffect(() => {
-    let unsubscribers = [];
-    let jobsData = [];
-    let accommodationsData = [];
-    let jobsLoaded = false;
-    let accommodationsLoaded = false;
+  // Load data from cache first, then network if needed
+  const loadInitialData = useCallback(async (forceRefresh = false) => {
+    try {
+      if (!forceRefresh) {
+        // Try to load from cache first
+        const [cachedJobs, cachedAccommodations] = await Promise.all([
+          dataCache.getCachedJobs(),
+          dataCache.getCachedAccommodations()
+        ]);
 
-    const checkAndUpdateJobs = () => {
-      if (jobsLoaded && accommodationsLoaded) {
-        setJobs([...jobsData, ...accommodationsData]);
-        setLoading(false);
+        if (cachedJobs && cachedAccommodations) {
+          // Use cached data
+          const allJobs = [...cachedJobs.data, ...cachedAccommodations.data];
+          setJobs(allJobs);
+          setLoading(false);
+          
+          console.log('Loaded data from cache:', {
+            jobs: cachedJobs.data.length,
+            accommodations: cachedAccommodations.data.length,
+            remainingTime: dataCache.formatRemainingTime(Math.min(cachedJobs.remainingTime, cachedAccommodations.remainingTime))
+          });
+          
+          return; // Don't load from network
+        }
+      }
+
+      // Load from network
+      await loadFromNetwork();
+      
+    } catch (error) {
+      console.warn('Error loading initial data:', error);
+      setLoading(false);
+    }
+  }, []);
+
+  // Load data from Firestore and cache it
+  const loadFromNetwork = useCallback(async () => {
+    setLoading(true);
+    
+    try {
+      // Load jobs
+      const jobsQuery = fsQuery(
+        collection(db, 'jobs'), 
+        orderBy('createdAt', 'desc'),
+        limit(BATCH_SIZE)
+      );
+      
+      const jobsSnapshot = await getDocs(jobsQuery);
+      const jobsData = jobsSnapshot.docs.map(d => ({ 
+        id: d.id, 
+        kind: 'job',
+        ...d.data() 
+      }));
+      
+      // Load accommodations
+      const accommodationsQuery = fsQuery(
+        collection(db, 'accommodations'), 
+        orderBy('createdAt', 'desc'),
+        limit(BATCH_SIZE)
+      );
+      
+      const accommodationsSnapshot = await getDocs(accommodationsQuery);
+      const accommodationsData = accommodationsSnapshot.docs.map(d => ({ 
+        id: d.id, 
+        kind: 'accommodation',
+        ...d.data() 
+      }));
+
+      // Combine and set jobs
+      const allJobs = [...jobsData, ...accommodationsData];
+      setJobs(allJobs);
+
+      // Update pagination state
+      const newLastVisible = {
+        jobs: jobsSnapshot.docs[jobsSnapshot.docs.length - 1] || null,
+        accommodations: accommodationsSnapshot.docs[accommodationsSnapshot.docs.length - 1] || null
+      };
+      setLastVisible(newLastVisible);
+      
+      const newHasMore = {
+        jobs: jobsSnapshot.docs.length === BATCH_SIZE,
+        accommodations: accommodationsSnapshot.docs.length === BATCH_SIZE
+      };
+      setHasMore(newHasMore);
+
+      // Cache the data
+      await Promise.all([
+        dataCache.saveJobs(jobsData),
+        dataCache.saveAccommodations(accommodationsData),
+        dataCache.savePaginationState(newHasMore, newLastVisible)
+      ]);
+
+      console.log('Loaded data from network and cached:', {
+        jobs: jobsData.length,
+        accommodations: accommodationsData.length
+      });
+      
+    } catch (error) {
+      console.warn('Error loading from network:', error);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  // Auto-refresh timer - check every minute if data needs refresh
+  useEffect(() => {
+    const checkForStaleData = async () => {
+      const [cachedJobs, cachedAccommodations] = await Promise.all([
+        dataCache.getCachedJobs(),
+        dataCache.getCachedAccommodations()
+      ]);
+      
+      // If either cache is stale, auto-refresh
+      if (!cachedJobs || !cachedAccommodations) {
+        console.log('Cache expired, auto-refreshing...');
+        await loadInitialData(true);
       }
     };
-
-    // Optimized jobs subscription with pagination
-    const jobsQuery = fsQuery(
-      collection(db, 'jobs'), 
-      orderBy('createdAt', 'desc'),
-      limit(BATCH_SIZE)
-    );
     
-    const jobsUnsub = onSnapshot(jobsQuery, 
-      snap => {
-        jobsData = snap.docs.map(d => ({ 
+    // Check every minute
+    const interval = setInterval(checkForStaleData, 60000);
+    
+    return () => clearInterval(interval);
+  }, [loadInitialData]);
+
+  // Initial data load - try cache first, then network
+  useEffect(() => {
+    loadInitialData();
+  }, [loadInitialData]);
+
+  // Pull to refresh handler
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadInitialData(true); // Force refresh from network
+  }, [loadInitialData]);
+
+  // Load more jobs when scrolling - with proper pagination
+  const loadMoreJobs = useCallback(async () => {
+    if (loadingMore || refreshing) return;
+    
+    // Check if we can load more of either type
+    const canLoadMoreJobs = hasMore.jobs && lastVisible.jobs;
+    const canLoadMoreAccommodations = hasMore.accommodations && lastVisible.accommodations;
+    
+    if (!canLoadMoreJobs && !canLoadMoreAccommodations) return;
+    
+    setLoadingMore(true);
+    
+    try {
+      const newJobs = [];
+      const newAccommodations = [];
+      
+      // Load more jobs if available
+      if (canLoadMoreJobs) {
+        const nextJobsQuery = fsQuery(
+          collection(db, 'jobs'),
+          orderBy('createdAt', 'desc'),
+          startAfter(lastVisible.jobs),
+          limit(BATCH_SIZE)
+        );
+        
+        const jobsSnapshot = await getDocs(nextJobsQuery);
+        const moreJobs = jobsSnapshot.docs.map(d => ({ 
           id: d.id, 
           kind: 'job',
           ...d.data() 
         }));
-        jobsLoaded = true;
-        checkAndUpdateJobs();
         
-        // Set pagination state
-        const lastDoc = snap.docs[snap.docs.length - 1];
-        setLastVisible(lastDoc || null);
-        setHasMore(snap.docs.length === BATCH_SIZE);
-      }, 
-      err => {
-        console.warn('jobs snapshot error', err);
-        jobsLoaded = true;
-        checkAndUpdateJobs();
+        newJobs.push(...moreJobs);
+        
+        // Update pagination state for jobs
+        if (jobsSnapshot.docs.length > 0) {
+          const lastJobDoc = jobsSnapshot.docs[jobsSnapshot.docs.length - 1];
+          setLastVisible(prev => ({ ...prev, jobs: lastJobDoc }));
+        }
+        setHasMore(prev => ({ ...prev, jobs: jobsSnapshot.docs.length === BATCH_SIZE }));
       }
-    );
-
-    // Optimized accommodations subscription
-    const accommodationsQuery = fsQuery(
-      collection(db, 'accommodations'), 
-      orderBy('createdAt', 'desc'),
-      limit(BATCH_SIZE)
-    );
-    
-    const accommodationsUnsub = onSnapshot(accommodationsQuery,
-      snap => {
-        accommodationsData = snap.docs.map(d => ({ 
+      
+      // Load more accommodations if available
+      if (canLoadMoreAccommodations) {
+        const nextAccommodationsQuery = fsQuery(
+          collection(db, 'accommodations'),
+          orderBy('createdAt', 'desc'),
+          startAfter(lastVisible.accommodations),
+          limit(BATCH_SIZE)
+        );
+        
+        const accommodationsSnapshot = await getDocs(nextAccommodationsQuery);
+        const moreAccommodations = accommodationsSnapshot.docs.map(d => ({ 
           id: d.id, 
           kind: 'accommodation',
           ...d.data() 
         }));
-        accommodationsLoaded = true;
-        checkAndUpdateJobs();
-      },
-      err => {
-        console.warn('accommodations snapshot error', err);
-        accommodationsLoaded = true;
-        checkAndUpdateJobs();
+        
+        newAccommodations.push(...moreAccommodations);
+        
+        // Update pagination state for accommodations
+        if (accommodationsSnapshot.docs.length > 0) {
+          const lastAccDoc = accommodationsSnapshot.docs[accommodationsSnapshot.docs.length - 1];
+          setLastVisible(prev => ({ ...prev, accommodations: lastAccDoc }));
+        }
+        setHasMore(prev => ({ ...prev, accommodations: accommodationsSnapshot.docs.length === BATCH_SIZE }));
       }
-    );
-
-    unsubscribers.push(jobsUnsub, accommodationsUnsub);
-
-    return () => {
-      unsubscribers.forEach(unsub => unsub());
-    };
-  }, []);
-
-  // Load more jobs when scrolling
-  const loadMoreJobs = useCallback(async () => {
-    if (!hasMore || loadingMore || !lastVisible) return;
-    
-    setLoadingMore(true);
-    try {
-      // This would need to be implemented based on your pagination needs
-      // For now, we'll just disable loading more to prevent infinite loading
-      setHasMore(false);
+      
+      // Add new items to existing jobs
+      if (newJobs.length > 0 || newAccommodations.length > 0) {
+        setJobs(prevJobs => [...prevJobs, ...newJobs, ...newAccommodations]);
+      }
+      
     } catch (error) {
       console.warn('Error loading more jobs:', error);
     } finally {
       setLoadingMore(false);
     }
-  }, [hasMore, loadingMore, lastVisible]);
+  }, [loadingMore, refreshing, hasMore, lastVisible]);
 
   // Memoized render item to prevent unnecessary re-renders
-  const renderJobItem = useCallback(({ item }) => (
-    <View style={{ paddingHorizontal: 12 }}>
-      <JobItem 
-        item={item} 
-        onOpen={onOpenJob} 
-        onSave={onSaveJob} 
-        saved={savedIds.includes(item.id)} 
-        userLocation={userLocation} 
-      />
-    </View>
-  ), [onOpenJob, onSaveJob, savedIds, userLocation]);
+  const renderJobItem = useCallback(({ item }) => {
+    // Render refreshing card for the special marker
+    if (item.isRefreshingCard) {
+      return (
+        <View style={{ paddingHorizontal: 12 }}>
+          <RefreshingCard />
+        </View>
+      );
+    }
+    
+    // Render normal job item
+    return (
+      <View style={{ paddingHorizontal: 12 }}>
+        <JobItem 
+          item={item} 
+          onOpen={onOpenJob} 
+          onSave={onSaveJob} 
+          saved={savedIds.includes(item.id)} 
+          userLocation={userLocation} 
+        />
+      </View>
+    );
+  }, [onOpenJob, onSaveJob, savedIds, userLocation]);
 
-  const keyExtractor = useCallback((item) => item.id, []);
+  const keyExtractor = useCallback((item) => {
+    // Handle refreshing card
+    if (item.isRefreshingCard) {
+      return '__refreshing__';
+    }
+    // Handle normal job items
+    return item.id;
+  }, []);
 
   return (
     <View style={{ flex: 1 }}>
@@ -334,14 +497,34 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
         <ListSkeleton count={6} />
       ) : (
         <FlatList
-          data={filteredAndSortedJobs}
+          data={displayData}
           keyExtractor={keyExtractor}
           renderItem={renderJobItem}
           contentContainerStyle={{ paddingVertical: 12 }}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              colors={[Colors.primary]}
+              tintColor={Colors.primary}
+              title="Pull to refresh"
+              titleColor={Colors.muted}
+            />
+          }
           ListEmptyComponent={
-            <Text style={{ textAlign: 'center', marginTop: 20, color: Colors.muted }}>
-              No jobs found
-            </Text>
+            <View style={{ alignItems: 'center', marginTop: 40 }}>
+              <Text style={{ textAlign: 'center', color: Colors.muted, marginBottom: 8 }}>
+                No jobs found
+              </Text>
+              {!loading && (
+                <TouchableOpacity 
+                  onPress={() => handleRefresh()}
+                  style={[shared.smallButton, { backgroundColor: Colors.primary, borderColor: Colors.primary }]}
+                >
+                  <Text style={{ color: Colors.card }}>Refresh</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           }
           // Performance optimizations
           removeClippedSubviews={true}
@@ -350,8 +533,28 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
           initialNumToRender={8}
           getItemLayout={null} // Let FlatList calculate automatically for better performance
           onEndReached={loadMoreJobs}
-          onEndReachedThreshold={0.1}
-          ListFooterComponent={loadingMore ? <ListSkeleton count={2} /> : null}
+          onEndReachedThreshold={0.3}
+          ListFooterComponent={
+            loadingMore ? (
+              <View style={{ padding: 20, alignItems: 'center' }}>
+                <ListSkeleton count={2} />
+              </View>
+            ) : (
+              (hasMore.jobs || hasMore.accommodations) ? (
+                <View style={{ padding: 20, alignItems: 'center' }}>
+                  <Text style={{ color: Colors.muted, fontSize: 12 }}>
+                    Pull up to load more...
+                  </Text>
+                </View>
+              ) : (
+                <View style={{ padding: 20, alignItems: 'center' }}>
+                  <Text style={{ color: Colors.muted, fontSize: 12 }}>
+                    No more jobs to load
+                  </Text>
+                </View>
+              )
+            )
+          }
         />
       )}
     </View>
