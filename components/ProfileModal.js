@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Modal, View, Text, TouchableOpacity, Image, TextInput, Alert, ActivityIndicator } from 'react-native';
 import * as Location from 'expo-location';
+import * as ImagePicker from 'expo-image-picker';
 // persistence removed: no AsyncStorage usage here
 import { shared, Colors } from './Theme';
 
@@ -22,7 +23,6 @@ export default function ProfileModal({ visible, user = null, onClose, onSave }) 
 
   const pickPhoto = async () => {
     try {
-      const ImagePicker = await import('expo-image-picker');
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!perm.granted) { Alert.alert('Permission', 'Media library permission required'); return; }
       const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.7 });

@@ -19,27 +19,8 @@ import { ListSkeleton } from './SkeletonLoader';
 import { useDebouncedSearch } from '../hooks';
 import { dataCache } from '../utils/dataCache';
 
-// Performance optimized distance calculatio          {/* Apply Button */}
-          <View style={{ padding: 16 }}>
-            <TouchableOpacity
-              onPress={() => setShowFilterModal(false)}
-              style={[
-                shared.primaryButton,
-                { backgroundColor: Colors.primary }
-              ]}
-            >
-              <Text style={{ color: Colors.card, fontWeight: '600', textAlign: 'center' }}>
-                Apply Filters
-              </Text>
-            </TouchableOpacity>
-          </View>
-//         </SafeAreaView>
-//       </Modal>
-//     </View>
-//   );
-// }
-
 // Performance optimized distance calculation with memoization
+const distanceCache = new Map();
 const toRad = (deg) => deg * Math.PI / 180;
 const haversineKm = (lat1, lon1, lat2, lon2) => {
   const key = `${lat1},${lon1},${lat2},${lon2}`;
@@ -218,15 +199,6 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
     return filteredAndSortedJobs;
   }, [refreshing, filteredAndSortedJobs]);
 
-  // Remove the old debounced query effect since we're using the hook
-  // useEffect(() => {
-  //   const timeoutId = setTimeout(() => {
-  //     // Query change handled by memoized filteredAndSortedJobs
-  //   }, 300);
-  //   
-  //   return () => clearTimeout(timeoutId);
-  // }, [query]);
-
   // Load data from cache first, then network if needed
   const loadInitialData = useCallback(async (forceRefresh = false) => {
     try {
@@ -238,18 +210,14 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
         ]);
 
         if (cachedJobs && cachedAccommodations) {
-          // Use cached data - deduplicate by ID
+          // Use cached data
           const allJobs = [...cachedJobs.data, ...cachedAccommodations.data];
-          const uniqueJobs = allJobs.filter((job, index, self) => 
-            index === self.findIndex(j => j.id === job.id)
-          );
-          setJobs(uniqueJobs);
+          setJobs(allJobs);
           setLoading(false);
           
           console.log('Loaded data from cache:', {
             jobs: cachedJobs.data.length,
             accommodations: cachedAccommodations.data.length,
-            totalUnique: uniqueJobs.length,
             remainingTime: dataCache.formatRemainingTime(Math.min(cachedJobs.remainingTime, cachedAccommodations.remainingTime))
           });
           
@@ -299,12 +267,9 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
         ...d.data() 
       }));
 
-      // Combine and set jobs - deduplicate by ID
+      // Combine and set jobs
       const allJobs = [...jobsData, ...accommodationsData];
-      const uniqueJobs = allJobs.filter((job, index, self) => 
-        index === self.findIndex(j => j.id === job.id)
-      );
-      setJobs(uniqueJobs);
+      setJobs(allJobs);
 
       // Update pagination state
       const newLastVisible = {
@@ -328,8 +293,7 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
 
       console.log('Loaded data from network and cached:', {
         jobs: jobsData.length,
-        accommodations: accommodationsData.length,
-        totalUnique: uniqueJobs.length
+        accommodations: accommodationsData.length
       });
       
     } catch (error) {
@@ -440,16 +404,9 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
         setHasMore(prev => ({ ...prev, accommodations: accommodationsSnapshot.docs.length === BATCH_SIZE }));
       }
       
-      // Add new items to existing jobs - deduplicate by ID
+      // Add new items to existing jobs
       if (newJobs.length > 0 || newAccommodations.length > 0) {
-        setJobs(prevJobs => {
-          const allJobs = [...prevJobs, ...newJobs, ...newAccommodations];
-          // Remove duplicates based on ID
-          const uniqueJobs = allJobs.filter((job, index, self) => 
-            index === self.findIndex(j => j.id === job.id)
-          );
-          return uniqueJobs;
-        });
+        setJobs(prevJobs => [...prevJobs, ...newJobs, ...newAccommodations]);
       }
       
     } catch (error) {
@@ -557,6 +514,41 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
           }]}
         >
           <Text style={{ color: filterKind==='accommodation'?Colors.card:Colors.muted }}>Accommodation</Text>
+        </TouchableOpacity>
+        
+        <View style={{ flex: 1 }} />
+        
+        <TouchableOpacity 
+          style={[shared.smallButton, { 
+            marginRight: 8, 
+            backgroundColor: partTimeOnly ? Colors.primary : Colors.card, 
+            borderColor: partTimeOnly ? Colors.primary : Colors.border 
+          }]} 
+          onPress={() => setPartTimeOnly(!partTimeOnly)}
+        >
+          <Text style={{ color: partTimeOnly ? Colors.card : Colors.muted }}>Part-time</Text>
+        </TouchableOpacity>
+        
+        {/* Fixed-size Toggle Sort Button */}
+        <TouchableOpacity 
+          style={[
+            shared.smallButton, 
+            { 
+              backgroundColor: Colors.primary, 
+              borderColor: Colors.primary,
+              width: 40,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }
+          ]} 
+          onPress={() => setSortBy(sortBy === 'distance' ? 'time' : 'distance')}
+        >
+          <Ionicons 
+            name={sortBy === 'distance' ? 'location-outline' : 'time-outline'} 
+            size={14} 
+            color={Colors.card}
+          />
         </TouchableOpacity>
       </View>
 
@@ -812,10 +804,10 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
               onPress={() => setShowFilterModal(false)}
               style={[
                 shared.primaryButton,
-                { backgroundColor: Colors.primary, borderColor: Colors.primary }
+                { backgroundColor: Colors.primary }
               ]}
             >
-              <Text style={[shared.primaryButtonText, { color: Colors.card, fontWeight: '600', textAlign: 'center' }]}>
+              <Text style={[shared.primaryButtonText, { textAlign: 'center' }]}>
                 Apply Filters
               </Text>
             </TouchableOpacity>
