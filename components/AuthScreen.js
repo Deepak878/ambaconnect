@@ -309,8 +309,6 @@ export default function AuthScreen({ onLogin, onClose }) {
             console.error('Failed to save local user', e); 
           }
           
-          // Success - call onLogin to redirect user back to the app
-          console.log('Registration successful, calling onLogin with:', out);
           setName(''); 
           setPhone(''); 
           setDob('');
@@ -354,8 +352,6 @@ export default function AuthScreen({ onLogin, onClose }) {
               await AsyncStorage.setItem('user', JSON.stringify(out)); 
             } catch (_) {}
             
-            // Success - call onLogin to redirect user back to the app
-            console.log('Login successful, calling onLogin with:', out);
             setName(''); 
             setPhone(''); 
             setDob('');

@@ -12,8 +12,6 @@ import { storage, db } from '../firebaseConfig';
  */
 export const cleanupOrphanedImages = async () => {
   try {
-    console.log('Starting orphaned images cleanup...');
-    
     // Get all image URLs from Firestore documents
     const referencedImages = new Set();
     
@@ -43,8 +41,6 @@ export const cleanupOrphanedImages = async () => {
       }
     });
     
-    console.log(`Found ${referencedImages.size} referenced images in Firestore`);
-    
     // Get all files from storage
     const jobsRef = ref(storage, 'jobs');
     const accomsRef = ref(storage, 'accommodations');
@@ -58,13 +54,12 @@ export const cleanupOrphanedImages = async () => {
         const downloadURL = await import('firebase/storage').then(({ getDownloadURL }) => getDownloadURL(item));
         
         if (!referencedImages.has(downloadURL)) {
-          console.log(`Deleting orphaned job image: ${item.name}`);
           await deleteObject(item);
           deletedCount++;
         }
       }
     } catch (error) {
-      console.log('No jobs folder or error accessing it:', error.message);
+      // Jobs folder missing or inaccessible
     }
     
     // Check accommodations folder
@@ -74,16 +69,13 @@ export const cleanupOrphanedImages = async () => {
         const downloadURL = await import('firebase/storage').then(({ getDownloadURL }) => getDownloadURL(item));
         
         if (!referencedImages.has(downloadURL)) {
-          console.log(`Deleting orphaned accommodation image: ${item.name}`);
           await deleteObject(item);
           deletedCount++;
         }
       }
     } catch (error) {
-      console.log('No accommodations folder or error accessing it:', error.message);
+      // Accommodations folder missing or inaccessible
     }
-    
-    console.log(`Cleanup complete. Deleted ${deletedCount} orphaned images.`);
     return { success: true, deletedCount };
     
   } catch (error) {
@@ -108,7 +100,7 @@ export const getStorageStats = async () => {
       const jobsList = await listAll(jobsRef);
       stats.jobs.count = jobsList.items.length;
     } catch (error) {
-      console.log('No jobs folder found');
+      // Jobs folder missing or inaccessible
     }
     
     // Check accommodations folder
@@ -117,7 +109,7 @@ export const getStorageStats = async () => {
       const accomsList = await listAll(accomsRef);
       stats.accommodations.count = accomsList.items.length;
     } catch (error) {
-      console.log('No accommodations folder found');
+      // Accommodations folder missing or inaccessible
     }
     
     return stats;

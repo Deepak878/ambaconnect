@@ -63,20 +63,15 @@ export default function App() {
     }
     
     // Handle authenticated user - preserve all user data from AuthScreen
-    console.log('handleLogin called with user:', u);
-    
     // Use the complete user object from AuthScreen, just ensure ID is normalized
     const normalizedUser = {
       ...u, // Preserve all fields (name, phone, dob, privacySettings, etc.)
       id: u.id || (u.phone ? u.phone.replace(/[^0-9]/g, '') : undefined)
     };
-    
-    console.log('Setting user to:', normalizedUser);
     setUser(normalizedUser);
     
     // Close the auth modal with a small delay to ensure state updates
     setTimeout(() => {
-      console.log('Closing auth modal');
       setAuthVisible(false);
     }, 100);
     
@@ -465,7 +460,6 @@ export default function App() {
           return null;
         }).filter(Boolean);
         
-        console.log('Loaded saved job IDs:', ids); // Debug log
         setSavedIds(ids);
       }, error => {
         console.error('Error listening to saved jobs:', error);

@@ -184,7 +184,6 @@ export default function PostScreen({ onPost, onOpenAuth, user }) {
     
     // If it's an existing photo from storage (during edit), we should track it for deletion
     if (photoToRemove.uri.startsWith('https://') && isEditing) {
-      console.log(`Marking image for removal: ${photoToRemove.uri}`);
       // Store removed images to delete them when post is updated
       if (!removedImages) {
         setRemovedImages([photoToRemove.uri]);
@@ -192,8 +191,6 @@ export default function PostScreen({ onPost, onOpenAuth, user }) {
         setRemovedImages(prev => [...prev, photoToRemove.uri]);
       }
     }
-    
-    console.log(`Removing photo ${index + 1} from UI`);
     setPhotos(prev => prev.filter((_, i) => i !== index));
   };
 
@@ -209,18 +206,13 @@ export default function PostScreen({ onPost, onOpenAuth, user }) {
         throw new Error('User not authenticated. Please login again.');
       }
 
-      console.log(`Starting upload for user: ${localUser.id}, type: ${listingType}`);
-      
       const uploadPromises = photos.map(async (photo, index) => {
         try {
           // Check if photo is already uploaded (existing photo during edit)
           if (photo.uri.startsWith('https://')) {
-            console.log(`Photo ${index} already uploaded: ${photo.uri}`);
             return photo.uri;
           }
 
-          console.log(`Uploading photo ${index + 1}/${photos.length}...`);
-          
           const response = await fetch(photo.uri);
           const blob = await response.blob();
           
@@ -232,12 +224,8 @@ export default function PostScreen({ onPost, onOpenAuth, user }) {
           const folderName = listingType === 'job' ? 'jobs' : 'accommodations';
           const storageRef = ref(storage, `${folderName}/${fileName}`);
           
-          console.log(`Uploading to: ${folderName}/${fileName}`);
-          
           await uploadBytes(storageRef, blob);
           const downloadURL = await getDownloadURL(storageRef);
-          
-          console.log(`Upload successful: ${downloadURL}`);
           return downloadURL;
         } catch (error) {
           console.error(`Error uploading photo ${index}:`, error);
@@ -257,8 +245,6 @@ export default function PostScreen({ onPost, onOpenAuth, user }) {
 
       const uploadedUrls = await Promise.all(uploadPromises);
       const validUrls = uploadedUrls.filter(url => url !== null);
-      
-      console.log(`Successfully uploaded ${validUrls.length} out of ${photos.length} photos`);
       return validUrls;
       
     } catch (error) {
@@ -276,8 +262,6 @@ export default function PostScreen({ onPost, onOpenAuth, user }) {
   const deleteImagesFromStorage = async (imageUrls) => {
     if (!imageUrls || imageUrls.length === 0) return;
 
-    console.log(`Deleting ${imageUrls.length} images from storage...`);
-    
     const deletePromises = imageUrls.map(async (imageUrl) => {
       try {
         // Extract the file path from the download URL
@@ -291,24 +275,20 @@ export default function PostScreen({ onPost, onOpenAuth, user }) {
         
         // Decode the URL-encoded path
         const filePath = decodeURIComponent(urlParts);
-        console.log(`Deleting image: ${filePath}`);
         
         const imageRef = ref(storage, filePath);
         await deleteObject(imageRef);
-        
-        console.log(`Successfully deleted: ${filePath}`);
       } catch (error) {
         console.error('Error deleting image:', imageUrl, error);
         // Don't throw error here - continue with other deletions
         if (error.code === 'storage/object-not-found') {
-          console.log('Image already deleted or does not exist:', imageUrl);
+          console.warn('Image already deleted or does not exist:', imageUrl);
         }
       }
     });
 
     try {
       await Promise.all(deletePromises);
-      console.log('Finished deleting images from storage');
     } catch (error) {
       console.error('Some images could not be deleted:', error);
     }
@@ -369,11 +349,9 @@ export default function PostScreen({ onPost, onOpenAuth, user }) {
               setLoadingMyPosts(true);
               
               const collection_name = post.kind === 'accommodation' ? 'accommodations' : 'jobs';
-              console.log('Deleting post:', post.id, 'from collection:', collection_name);
               
               // First, delete associated images from storage
               if (post.images && post.images.length > 0) {
-                console.log(`Deleting ${post.images.length} images for post: ${post.id}`);
                 await deleteImagesFromStorage(post.images);
               }
               
@@ -417,7 +395,7 @@ export default function PostScreen({ onPost, onOpenAuth, user }) {
           const km = haversineKm(userLocation.latitude, userLocation.longitude, post.lat, post.lng);
           setPickerDistanceKm(km);
         } catch (e) {
-          console.log('Error calculating distance:', e);
+          console.error('Error calculating distance:', e);
         }
       }
     }
@@ -560,9 +538,6 @@ export default function PostScreen({ onPost, onOpenAuth, user }) {
             const existingImages = photos.filter(photo => photo.uri.startsWith('https://')).map(photo => photo.uri);
             const newPhotos = photos.filter(photo => !photo.uri.startsWith('https://'));
             
-            console.log(`Job Edit: ${existingImages.length} existing images, ${newPhotos.length} new photos`);
-            console.log(`Job Edit: ${removedImages.length} images to remove`);
-            
             // Start with existing images that are still in photos array (not removed)
             imageUrls = [...existingImages];
             
@@ -571,8 +546,6 @@ export default function PostScreen({ onPost, onOpenAuth, user }) {
               const newImageUrls = await uploadPhotosToStorage(jobId, 'job');
               imageUrls = [...imageUrls, ...newImageUrls];
             }
-            
-            console.log(`Job Edit: Final image count: ${imageUrls.length}`);
           } catch (error) {
             console.error('Photo upload error:', error);
             Alert.alert('Upload Error', 'Failed to upload some photos. Job will be posted without new images.');
@@ -580,13 +553,11 @@ export default function PostScreen({ onPost, onOpenAuth, user }) {
             imageUrls = photos.filter(photo => photo.uri.startsWith('https://')).map(photo => photo.uri);
           }
         } else if (isEditing) {
-          console.log('Job Edit: All photos removed, images array will be empty');
         }
 
         // Handle removed images during edit
         if (isEditing && removedImages.length > 0) {
           await deleteImagesFromStorage(removedImages);
-          console.log(`Deleted ${removedImages.length} removed images from storage`);
         }
 
         const job = {
@@ -678,9 +649,6 @@ export default function PostScreen({ onPost, onOpenAuth, user }) {
             const existingImages = photos.filter(photo => photo.uri.startsWith('https://')).map(photo => photo.uri);
             const newPhotos = photos.filter(photo => !photo.uri.startsWith('https://'));
             
-            console.log(`Accommodation Edit: ${existingImages.length} existing images, ${newPhotos.length} new photos`);
-            console.log(`Accommodation Edit: ${removedImages.length} images to remove`);
-            
             // Start with existing images that are still in photos array (not removed)
             imageUrls = [...existingImages];
             
@@ -689,8 +657,6 @@ export default function PostScreen({ onPost, onOpenAuth, user }) {
               const newImageUrls = await uploadPhotosToStorage(accomId, 'accommodation');
               imageUrls = [...imageUrls, ...newImageUrls];
             }
-            
-            console.log(`Accommodation Edit: Final image count: ${imageUrls.length}`);
           } catch (error) {
             console.error('Photo upload error:', error);
             Alert.alert('Upload Error', 'Failed to upload some photos. Accommodation will be posted without new images.');
@@ -698,13 +664,11 @@ export default function PostScreen({ onPost, onOpenAuth, user }) {
             imageUrls = photos.filter(photo => photo.uri.startsWith('https://')).map(photo => photo.uri);
           }
         } else if (isEditing) {
-          console.log('Accommodation Edit: All photos removed, images array will be empty');
         }
 
         // Handle removed images during edit
         if (isEditing && removedImages.length > 0) {
           await deleteImagesFromStorage(removedImages);
-          console.log(`Deleted ${removedImages.length} removed images from storage`);
         }
 
         const accom = {

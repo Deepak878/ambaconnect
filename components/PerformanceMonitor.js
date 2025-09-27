@@ -15,9 +15,6 @@ export const PerformanceMonitor = ({ onLoadTime, screenName = 'Screen' }) => {
     if (onLoadTime) {
       onLoadTime(duration);
     }
-    
-    // Log performance for debugging
-    console.log(`${screenName} load time: ${duration}ms`);
   }, [startTime, onLoadTime, screenName]);
 
   // Only show in development

@@ -31,15 +31,11 @@ export default function ProfileModal({ visible, user = null, onClose, onSave }) 
 
     setLoadingProfile(true);
     try {
-      console.log('Loading user profile from Firestore for user:', user.id);
-      
       const userDocRef = doc(db, 'users', user.id);
       const userDocSnap = await getDoc(userDocRef);
       
       if (userDocSnap.exists()) {
         const firestoreUserData = userDocSnap.data();
-        console.log('Loaded profile data from Firestore:', firestoreUserData);
-        
         // Update state with Firestore data, fallback to original user data
         setName(firestoreUserData.name || (user && user.name) || '');
         setEmail(firestoreUserData.email || (user && user.email) || '');
@@ -57,9 +53,7 @@ export default function ProfileModal({ visible, user = null, onClose, onSave }) 
         };
         await AsyncStorage.setItem('user', JSON.stringify(updatedUser));
         
-        console.log('Profile loaded successfully from Firestore');
       } else {
-        console.log('No profile document found in Firestore, using local data');
         // Use local user data if no Firestore document exists
         setName((user && user.name) || '');
         setEmail((user && user.email) || '');
@@ -101,8 +95,6 @@ export default function ProfileModal({ visible, user = null, onClose, onSave }) 
 
   const uploadPhotoToStorage = async (userId, photoUri) => {
     try {
-      console.log(`Uploading profile photo for user: ${userId}`);
-      
       const response = await fetch(photoUri);
       const blob = await response.blob();
       
@@ -113,12 +105,9 @@ export default function ProfileModal({ visible, user = null, onClose, onSave }) 
       // Use 'profiles' folder for user profile pictures
       const storageRef = ref(storage, `profiles/${fileName}`);
       
-      console.log(`Uploading profile photo to: profiles/${fileName}`);
-      
       await uploadBytes(storageRef, blob);
       const downloadURL = await getDownloadURL(storageRef);
       
-      console.log(`Profile photo upload successful: ${downloadURL}`);
       return downloadURL;
     } catch (error) {
       console.error('Error uploading profile photo:', error);
@@ -151,16 +140,13 @@ export default function ProfileModal({ visible, user = null, onClose, onSave }) 
       
       // Decode the URL-encoded path
       const filePath = decodeURIComponent(urlParts);
-      console.log(`Deleting old profile photo: ${filePath}`);
-      
       const imageRef = ref(storage, filePath);
       await deleteObject(imageRef);
       
-      console.log(`Successfully deleted old profile photo: ${filePath}`);
     } catch (error) {
       console.error('Error deleting old profile photo:', error);
       if (error.code === 'storage/object-not-found') {
-        console.log('Old profile photo already deleted or does not exist');
+  console.warn('Old profile photo already deleted or does not exist');
       }
     }
   };
@@ -314,7 +300,6 @@ export default function ProfileModal({ visible, user = null, onClose, onSave }) 
         if (userDocSnap.exists()) {
           // Document exists, update it
           await updateDoc(userDocRef, userData);
-          console.log('Profile updated in existing Firestore document');
         } else {
           // Document doesn't exist, create it with additional required fields
           await setDoc(userDocRef, {
@@ -323,14 +308,11 @@ export default function ProfileModal({ visible, user = null, onClose, onSave }) 
             phone: user.phone, // Preserve phone from original user data
             createdAt: new Date().toISOString()
           });
-          console.log('Profile created in new Firestore document');
         }
 
         // Update in AsyncStorage
         await AsyncStorage.setItem('user', JSON.stringify(updatedUser));
-        
-        console.log('Profile updated successfully in Firestore and AsyncStorage');
-        
+
         // Call parent onSave with updated user data
         onSave(updatedUser);
         onClose();
@@ -382,21 +364,17 @@ export default function ProfileModal({ visible, user = null, onClose, onSave }) 
                 return;
               }
 
-              console.log('Starting account deletion process for user:', user.id);
-
               // Import necessary Firestore functions
               const { collection, query, where, getDocs, deleteDoc, doc: fsDoc, getDoc: fsGetDoc } = await import('firebase/firestore');
               
               // 1. Delete profile photo from storage
               if (user.photo && user.photo.includes('firebasestorage.googleapis.com')) {
                 await deletePhotoFromStorage(user.photo);
-                console.log('Profile photo deleted from storage');
               }
 
               // 2. Delete all user's job posts and their images
               const jobsQuery = query(collection(db, 'jobs'), where('createdById', '==', user.id));
               const jobsSnapshot = await getDocs(jobsQuery);
-              console.log(`Found ${jobsSnapshot.docs.length} job posts to delete`);
               
               for (const jobDoc of jobsSnapshot.docs) {
                 const jobData = jobDoc.data();
@@ -413,7 +391,6 @@ export default function ProfileModal({ visible, user = null, onClose, onSave }) 
               // 3. Delete all user's accommodation posts and their images
               const accomQuery = query(collection(db, 'accommodations'), where('createdById', '==', user.id));
               const accomSnapshot = await getDocs(accomQuery);
-              console.log(`Found ${accomSnapshot.docs.length} accommodation posts to delete`);
               
               for (const accomDoc of accomSnapshot.docs) {
                 const accomData = accomDoc.data();
@@ -430,7 +407,6 @@ export default function ProfileModal({ visible, user = null, onClose, onSave }) 
               // 4. Delete all saved items by this user
               const savedQuery = query(collection(db, 'saved'), where('userId', '==', user.id));
               const savedSnapshot = await getDocs(savedQuery);
-              console.log(`Found ${savedSnapshot.docs.length} saved items to delete`);
               
               for (const savedDoc of savedSnapshot.docs) {
                 await deleteDoc(fsDoc(db, 'saved', savedDoc.id));
@@ -441,14 +417,10 @@ export default function ProfileModal({ visible, user = null, onClose, onSave }) 
               const userDocSnap = await fsGetDoc(userDocRef);
               if (userDocSnap.exists()) {
                 await deleteDoc(userDocRef);
-                console.log('User document deleted from Firestore');
-              } else {
-                console.log('User document did not exist in Firestore');
               }
 
               // 6. Clear local storage
               await AsyncStorage.removeItem('user');
-              console.log('User data cleared from AsyncStorage');
 
               Alert.alert(
                 'Account Deleted',

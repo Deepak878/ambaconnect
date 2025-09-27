@@ -54,7 +54,7 @@ const JobItem = memo(({ item, onOpen, onSave, saved, userLocation }) => {
   // Memoize time ago calculation
   const timeAgoText = useMemo(() => {
     if (!item.createdAt) {
-      console.log(`No createdAt for item: ${item.title}`);
+      console.warn(`No createdAt for item: ${item.title}`);
       return 'Recently posted'; // Fallback text instead of empty string
     }
     
@@ -64,29 +64,24 @@ const JobItem = memo(({ item, onOpen, onSave, saved, userLocation }) => {
       // Handle Firestore timestamp objects
       if (typeof item.createdAt === 'object' && item.createdAt.toDate) {
         date = item.createdAt.toDate();
-        console.log(`Firestore timestamp for ${item.title}:`, date);
       } else if (typeof item.createdAt === 'object' && item.createdAt.seconds) {
         // Handle Firestore timestamp in seconds format
         date = new Date(item.createdAt.seconds * 1000);
-        console.log(`Firestore seconds timestamp for ${item.title}:`, date);
       } else if (typeof item.createdAt === 'string' || typeof item.createdAt === 'number') {
         date = new Date(item.createdAt);
-        console.log(`String/Number date for ${item.title}:`, date);
       } else {
-        console.log(`Unknown createdAt format for ${item.title}:`, item.createdAt);
+        console.warn(`Unknown createdAt format for ${item.title}:`, item.createdAt);
         return 'Recently posted';
       }
       
       // Check if date is valid
       if (isNaN(date.getTime())) {
-        console.log(`Invalid date for ${item.title}:`, item.createdAt);
+        console.warn(`Invalid date for ${item.title}:`, item.createdAt);
         return 'Recently posted';
       }
       
       const now = new Date();
       const diffInMinutes = Math.floor((now - date) / (1000 * 60));
-      
-      console.log(`Time diff for ${item.title}: ${diffInMinutes} minutes`);
       
       if (diffInMinutes < 1) return 'Just now';
       if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
@@ -103,7 +98,7 @@ const JobItem = memo(({ item, onOpen, onSave, saved, userLocation }) => {
       const diffInMonths = Math.floor(diffInDays / 30);
       return `${diffInMonths}mo ago`;
     } catch (error) {
-      console.log(`Error calculating time for ${item.title}:`, error);
+      console.error(`Error calculating time for ${item.title}:`, error);
       return 'Recently posted';
     }
   }, [item.createdAt, item.title]);

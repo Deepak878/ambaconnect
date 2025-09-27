@@ -2,51 +2,47 @@
 // Add this to the JobsScreen component to help debug the issue
 
 const diagnostics = {
-  logJobsState: (propJobs, internalJobs, activeJobs, loading, refreshing) => {
-    console.log('=== JOBSSCREEN DIAGNOSTICS ===');
-    console.log('PropJobs:', {
+  logJobsState: (propJobs, internalJobs, activeJobs, loading, refreshing) => ({
+    propJobs: {
       available: !!propJobs,
       length: propJobs ? propJobs.length : 0,
       sample: propJobs ? propJobs.slice(0, 2).map(j => ({ id: j.id, title: j.title })) : []
-    });
-    console.log('Internal Jobs:', {
+    },
+    internalJobs: {
       length: internalJobs.length,
       sample: internalJobs.slice(0, 2).map(j => ({ id: j.id, title: j.title }))
-    });
-    console.log('Active Jobs (used for display):', {
+    },
+    activeJobs: {
       length: activeJobs.length,
       sample: activeJobs.slice(0, 2).map(j => ({ id: j.id, title: j.title }))
-    });
-    console.log('Loading States:', {
+    },
+    loadingStates: {
       loading,
       refreshing
-    });
-    console.log('Data Flow:', {
+    },
+    dataFlow: {
       usingPropJobs: propJobs && propJobs.length > 0,
       usingInternalJobs: !propJobs || propJobs.length === 0,
       hasAnyData: activeJobs.length > 0,
       shouldShowLoading: loading && activeJobs.length === 0
-    });
-    console.log('=== END DIAGNOSTICS ===');
-  },
+    }
+  }),
 
-  logFirestoreQuery: (query, snapshot) => {
-    console.log('=== FIRESTORE QUERY DIAGNOSTICS ===');
-    console.log('Query:', query);
-    console.log('Results:', {
+  logFirestoreQuery: (query, snapshot) => ({
+    query,
+    results: {
       size: snapshot?.size || 0,
       empty: snapshot?.empty || true,
       docs: snapshot?.docs?.length || 0
-    });
-    if (snapshot?.docs?.length > 0) {
-      console.log('Sample Results:', snapshot.docs.slice(0, 3).map(doc => ({
-        id: doc.id,
-        title: doc.data().title,
-        createdAt: doc.data().createdAt
-      })));
-    }
-    console.log('=== END FIRESTORE DIAGNOSTICS ===');
-  }
+    },
+    sample: snapshot?.docs?.length > 0
+      ? snapshot.docs.slice(0, 3).map(doc => ({
+          id: doc.id,
+          title: doc.data().title,
+          createdAt: doc.data().createdAt
+        }))
+      : []
+  })
 };
 
 // Usage in JobsScreen component:

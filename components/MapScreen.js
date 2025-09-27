@@ -53,9 +53,6 @@ export default function MapScreen({ jobs: propJobs = [], accommodations: propAcc
   }, []);
 
   function runSearch() {
-    console.log(`MapScreen runSearch - mode: ${mode}, accomFilter: ${accomFilter}, jobFilter: ${jobFilter}`);
-    console.log(`Available accommodations: ${accommodations.length}`);
-    
     let items = [];
 
     if (mode === 'jobs' || mode === 'all') {
@@ -64,27 +61,18 @@ export default function MapScreen({ jobs: propJobs = [], accommodations: propAcc
         if (jobFilter === 'full') return (j.type || '').toLowerCase().includes('full');
         return true;
       }).map(j => ({ ...j, _type: 'job' }));
-      console.log(`Found ${found.length} jobs after filtering`);
       items = items.concat(found);
     }
 
     if (mode === 'accommodations' || mode === 'all') {
       let found = (accommodations || []).map(a => ({ ...a, _type: 'accommodation' }));
-      console.log(`Initial accommodations before filtering: ${found.length}`);
-      
-      // Debug: log first few accommodations to see their availability field
-      found.slice(0, 3).forEach((acc, index) => {
-        console.log(`Accommodation ${index + 1}: ${acc.title}, availability: "${acc.availability}"`);
-      });
 
       if (mode === 'accommodations' && accomFilter === 'owned') {
         // Filter for "Whole" places (owned/private)
         found = found.filter(a => a.availability === 'Whole');
-        console.log(`Found ${found.length} owned accommodations (availability === 'Whole')`);
       } else if (mode === 'accommodations' && accomFilter === 'shared') {
         // Filter for "Sharing" places
         found = found.filter(a => a.availability === 'Sharing');
-        console.log(`Found ${found.length} shared accommodations (availability === 'Sharing')`);
       }
       
 
@@ -96,8 +84,6 @@ export default function MapScreen({ jobs: propJobs = [], accommodations: propAcc
       index === self.findIndex((t) => t.id === item.id && t._type === item._type)
     );
 
-    console.log(`Total unique items after filtering: ${uniqueItems.length}`);
-
     const withDist = uniqueItems.map(it => {
       if (userLocation && it.lat != null && it.lng != null) {
         const dist = haversine(userLocation.latitude, userLocation.longitude, it.lat, it.lng);
@@ -107,7 +93,6 @@ export default function MapScreen({ jobs: propJobs = [], accommodations: propAcc
     });
 
     const sorted = (userLocation) ? withDist.sort((a,b) => (a._distance || 1e9) - (b._distance || 1e9)) : withDist;
-    console.log(`Final sorted results: ${sorted.length}`);
     setResults(sorted);
     
     // Maintain selection if the selected item is still in results

@@ -512,7 +512,6 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
       
       // If either cache is stale, auto-refresh
       if (!cachedJobs || !cachedAccommodations) {
-        console.log('Cache expired, auto-refreshing...');
         await loadInitialData(true);
       }
     };

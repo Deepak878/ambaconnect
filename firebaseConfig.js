@@ -37,7 +37,7 @@ export const testFirestoreConnection = async () => {
 try {
   enableNetwork(db);
 } catch (error) {
-  console.log('Network enable error (can be ignored):', error);
+  console.error('Network enable error (can be ignored):', error);
 }
 
 // Initialize auth differently depending on environment.
