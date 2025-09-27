@@ -190,6 +190,7 @@ import { validateField, rateLimiter, sanitizeInput } from '../utils/validation';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { app, db } from '../firebaseConfig';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import PrivacyPolicy from './PrivacyPolicy';
 
 export default function AuthScreen({ onLogin, onClose }) {
   const [isRegister, setIsRegister] = useState(false);
@@ -198,6 +199,7 @@ export default function AuthScreen({ onLogin, onClose }) {
   const [dob, setDob] = useState('');
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
+  const [showPrivacyPolicy, setShowPrivacyPolicy] = useState(false);
   const inputAccessoryViewID = 'phoneAccessory';
 
   const validateInput = (field, value) => {
@@ -563,10 +565,17 @@ export default function AuthScreen({ onLogin, onClose }) {
               </Text>
             </TouchableOpacity>
 
+            <TouchableOpacity
+              onPress={() => setShowPrivacyPolicy(true)}
+              style={{ marginTop: 12, alignItems: 'center' }}
+            >
+              <Text style={{ color: Colors.muted, fontSize: 12 }}>Privacy Policy</Text>
+            </TouchableOpacity>
+
             {onClose ? (
               <TouchableOpacity
                 onPress={() => onClose()}
-                style={{ marginTop: 12, alignItems: 'center' }}
+                style={{ marginTop: 8, alignItems: 'center' }}
               >
                 <Text style={{ color: Colors.primary }}>Close</Text>
               </TouchableOpacity>
@@ -598,6 +607,12 @@ export default function AuthScreen({ onLogin, onClose }) {
           ) : null}
         </SafeAreaView>
       </TouchableWithoutFeedback>
+      
+      {/* Privacy Policy Modal */}
+      <PrivacyPolicy 
+        visible={showPrivacyPolicy} 
+        onClose={() => setShowPrivacyPolicy(false)} 
+      />
     </KeyboardAvoidingView>
   );
 }

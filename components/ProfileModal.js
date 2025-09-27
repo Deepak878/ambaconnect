@@ -9,6 +9,7 @@ import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage
 import { doc, updateDoc, setDoc, getDoc } from 'firebase/firestore';
 // persistence removed: no AsyncStorage usage here
 import { shared, Colors } from './Theme';
+import PrivacyPolicy from './PrivacyPolicy';
 
 const placeholder = require('../assets/icon.png');
 
@@ -23,6 +24,7 @@ export default function ProfileModal({ visible, user = null, onClose, onSave }) 
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [newPhotoSelected, setNewPhotoSelected] = useState(false);
   const [loadingProfile, setLoadingProfile] = useState(false);
+  const [showPrivacyPolicy, setShowPrivacyPolicy] = useState(false);
 
   const loadUserProfile = async () => {
     if (!user || !user.id || !visible) return;
@@ -655,6 +657,31 @@ export default function ProfileModal({ visible, user = null, onClose, onSave }) 
             </TouchableOpacity>
             
             <TouchableOpacity 
+              onPress={() => setShowPrivacyPolicy(true)} 
+              style={[
+                shared.smallButton, 
+                { 
+                  backgroundColor: Colors.card, 
+                  marginBottom: 8,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }
+              ]}
+              disabled={uploadingPhoto || loadingProfile}
+            >
+              <Ionicons 
+                name="shield-checkmark-outline" 
+                size={16} 
+                color={(uploadingPhoto || loadingProfile) ? Colors.muted : Colors.primary} 
+                style={{ marginRight: 6 }}
+              />
+              <Text style={{ color: (uploadingPhoto || loadingProfile) ? Colors.muted : Colors.primary }}>
+                Privacy Policy
+              </Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
               onPress={handleDeleteAccount} 
               style={[
                 shared.smallButton, 
@@ -681,6 +708,12 @@ export default function ProfileModal({ visible, user = null, onClose, onSave }) 
           </View>
         ) : null}
       </View>
+      
+      {/* Privacy Policy Modal */}
+      <PrivacyPolicy 
+        visible={showPrivacyPolicy} 
+        onClose={() => setShowPrivacyPolicy(false)} 
+      />
     </Modal>
   );
 }
