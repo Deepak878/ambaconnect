@@ -913,6 +913,26 @@ export default function PostScreen({ onPost, onOpenAuth, user }) {
         </TouchableOpacity>
       </View>
 
+      {/* 30-Day Visibility Notice */}
+      <View style={{
+        backgroundColor: '#FFF3CD',
+        borderLeftWidth: 4,
+        borderLeftColor: '#FFC107',
+        padding: 12,
+        marginBottom: 16,
+        borderRadius: 4,
+      }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+          <Ionicons name="information-circle" size={16} color="#856404" style={{ marginRight: 6 }} />
+          <Text style={{ fontWeight: '600', fontSize: 14, color: '#856404' }}>
+            Visibility Notice
+          </Text>
+        </View>
+        <Text style={{ fontSize: 12, color: '#856404', lineHeight: 16 }}>
+          Your {postKind === 'job' ? 'job posting' : 'accommodation listing'} will be visible to users for 30 days from the date of posting. After 30 days, it will automatically be hidden from search results.
+        </Text>
+      </View>
+
       {/* Job Form */}
       {postKind === 'job' && (
         <>

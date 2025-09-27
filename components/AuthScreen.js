@@ -310,9 +310,11 @@ export default function AuthScreen({ onLogin, onClose }) {
           }
           
           // Success - call onLogin to redirect user back to the app
+          console.log('Registration successful, calling onLogin with:', out);
           setName(''); 
           setPhone(''); 
           setDob('');
+          setLoading(false); // Make sure to reset loading state
           onLogin(out);
           return;
         } catch (err) {
@@ -353,9 +355,11 @@ export default function AuthScreen({ onLogin, onClose }) {
             } catch (_) {}
             
             // Success - call onLogin to redirect user back to the app
+            console.log('Login successful, calling onLogin with:', out);
             setName(''); 
             setPhone(''); 
             setDob('');
+            setLoading(false); // Make sure to reset loading state
             onLogin(out);
             return;
           } else {
@@ -428,10 +432,9 @@ export default function AuthScreen({ onLogin, onClose }) {
         }
       }
     } catch (e) {
-      console.error(e);
+      console.error('Error in handleSubmit:', e);
       Alert.alert('Error', 'Something went wrong. Please try again.');
-    } finally {
-      setLoading(false);
+      setLoading(false); // Ensure loading is reset on error
     }
   };
 

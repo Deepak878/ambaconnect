@@ -101,19 +101,37 @@ class DataCache {
   // Save pagination state
   async savePaginationState(hasMore, lastVisible) {
     try {
+      const serializeTimestamp = (value) => {
+        if (!value) return null;
+        if (typeof value === 'number') {
+          return value;
+        }
+        if (typeof value === 'string') {
+          const parsed = Number(value);
+          return Number.isNaN(parsed) ? null : parsed;
+        }
+        if (value.toMillis) {
+          return value.toMillis();
+        }
+        if (typeof value === 'object') {
+          const seconds = value.seconds || value._seconds;
+          const nanoseconds = value.nanoseconds || value._nanoseconds || 0;
+          if (typeof seconds === 'number') {
+            return seconds * 1000 + Math.floor(nanoseconds / 1e6);
+          }
+        }
+        return null;
+      };
+
       const paginationState = {
         hasMore,
         lastVisible: lastVisible ? {
-          jobs: lastVisible.jobs ? {
-            id: lastVisible.jobs.id,
-            // Store minimal data needed for pagination
-            createdAt: lastVisible.jobs.data()?.createdAt
-          } : null,
-          accommodations: lastVisible.accommodations ? {
-            id: lastVisible.accommodations.id,
-            createdAt: lastVisible.accommodations.data()?.createdAt
-          } : null
-        } : null,
+          jobs: serializeTimestamp(lastVisible.jobs),
+          accommodations: serializeTimestamp(lastVisible.accommodations)
+        } : {
+          jobs: null,
+          accommodations: null
+        },
         timestamp: Date.now()
       };
       
@@ -133,11 +151,15 @@ class DataCache {
       if (!stateData) return null;
       
       const state = JSON.parse(stateData);
-      if (!this.isDataFresh(state.timestamp)) {
+      if (!state || !this.isDataFresh(state.timestamp)) {
         return null; // Pagination state is stale
       }
       
-      return state;
+      return {
+        hasMore: state.hasMore || { jobs: true, accommodations: true },
+        lastVisible: state.lastVisible || { jobs: null, accommodations: null },
+        timestamp: state.timestamp
+      };
     } catch (error) {
       console.warn('Failed to get cached pagination state:', error);
       return null;

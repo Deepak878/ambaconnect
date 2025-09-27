@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { View, Text, TouchableOpacity, Alert, Modal, ActivityIndicator, Linking, Platform } from 'react-native';
 import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context';
@@ -44,33 +44,52 @@ export default function App() {
   const [userLocation, setUserLocation] = useState(null);
   const [isConnecting, setIsConnecting] = useState(true);
   const [connectionError, setConnectionError] = useState(null);
+  const [locationLabel, setLocationLabel] = useState('Location off');
+  const lastGeocodeRef = useRef({ timestamp: 0, latitude: null, longitude: null, label: 'Location off' });
 
   const handleLogin = async (u) => {
-    // persistence removed: accept incoming user object and store in memory only
-    if (u && u.guest) {
+    // Handle null/undefined user (logout)
+    if (!u) {
+      setUser(null);
+      setAuthVisible(false);
+      return;
+    }
+    
+    // Handle guest user
+    if (u.guest) {
       setUser({ guest: true });
       setAuthVisible(false);
       return;
     }
-    if (u) {
-      // normalize phone into id if provided
-      const id = u.id || (u.phone ? u.phone.replace(/[^0-9]/g, '') : undefined);
-      const data = { id, name: u.name || 'Anonymous', phone: u.phone };
-      setUser(data);
+    
+    // Handle authenticated user - preserve all user data from AuthScreen
+    console.log('handleLogin called with user:', u);
+    
+    // Use the complete user object from AuthScreen, just ensure ID is normalized
+    const normalizedUser = {
+      ...u, // Preserve all fields (name, phone, dob, privacySettings, etc.)
+      id: u.id || (u.phone ? u.phone.replace(/[^0-9]/g, '') : undefined)
+    };
+    
+    console.log('Setting user to:', normalizedUser);
+    setUser(normalizedUser);
+    
+    // Close the auth modal with a small delay to ensure state updates
+    setTimeout(() => {
+      console.log('Closing auth modal');
       setAuthVisible(false);
-      
-      // If user was on Post tab when they triggered login, stay there
-      // The PostScreen will automatically re-render with the new user data
-      
-      // after login, subscriptions will pick up saved items (useEffect below)
-      // perform pending action if any
-      if (pendingAction) {
-        const p = pendingAction;
-        setPendingAction(null);
-        if (p.type === 'save') saveJob(p.job);
-        if (p.type === 'post') postJob(p.job);
-      }
-      return;
+    }, 100);
+    
+    // If user was on Post tab when they triggered login, stay there
+    // The PostScreen will automatically re-render with the new user data
+    
+    // after login, subscriptions will pick up saved items (useEffect below)
+    // perform pending action if any
+    if (pendingAction) {
+      const p = pendingAction;
+      setPendingAction(null);
+      if (p.type === 'save') saveJob(p.job);
+      if (p.type === 'post') postJob(p.job);
     }
   };
   const openJob = async (job, opts) => {
@@ -264,10 +283,17 @@ export default function App() {
           ...doc.data()
         }));
         
-        // Update jobs in a batch to prevent multiple re-renders
+        // Update jobs with proper deduplication
         setJobs(prevJobs => {
           const accommodations = prevJobs.filter(j => j.kind === 'accommodation');
-          return [...firestoreJobs, ...accommodations];
+          const allItems = [...firestoreJobs, ...accommodations];
+          
+          // Deduplicate by ID
+          const uniqueItems = allItems.filter((item, index, self) => 
+            index === self.findIndex(i => i.id === item.id)
+          );
+          
+          return uniqueItems;
         });
         
         setIsConnecting(false);
@@ -286,10 +312,17 @@ export default function App() {
           ...doc.data()
         }));
         
-        // Update accommodations in a batch
+        // Update accommodations with proper deduplication
         setJobs(prevJobs => {
           const jobs = prevJobs.filter(j => j.kind === 'job');
-          return [...jobs, ...firestoreAccommodations];
+          const allItems = [...jobs, ...firestoreAccommodations];
+          
+          // Deduplicate by ID
+          const uniqueItems = allItems.filter((item, index, self) => 
+            index === self.findIndex(i => i.id === item.id)
+          );
+          
+          return uniqueItems;
         });
       }, (error) => {
         console.error('Accommodations listener error:', error);
@@ -349,6 +382,52 @@ export default function App() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!userLocation) {
+      setLocationLabel('Location off');
+      lastGeocodeRef.current = { timestamp: 0, latitude: null, longitude: null, label: 'Location off' };
+      return () => { cancelled = true; };
+    }
+
+    const { latitude, longitude } = userLocation;
+    const fallbackLabel = `${latitude.toFixed(2)}, ${longitude.toFixed(2)}`;
+    const now = Date.now();
+    const last = lastGeocodeRef.current;
+    const movedFar = !last.latitude || !last.longitude || Math.abs(latitude - last.latitude) > 0.002 || Math.abs(longitude - last.longitude) > 0.002;
+
+    if (!movedFar && now - last.timestamp < 60000) {
+      setLocationLabel(last.label || fallbackLabel);
+      return () => { cancelled = true; };
+    }
+
+    setLocationLabel('Locating...');
+
+    Location.reverseGeocodeAsync({ latitude, longitude })
+      .then((results) => {
+        if (cancelled) return;
+        const place = results && results[0];
+        const parts = [
+          place?.city || place?.district || place?.name,
+          place?.region || place?.subregion
+        ].filter(Boolean);
+        const label = parts.length ? parts.join(', ') : fallbackLabel;
+        lastGeocodeRef.current = { timestamp: Date.now(), latitude, longitude, label };
+        setLocationLabel(label);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        const label = fallbackLabel;
+        lastGeocodeRef.current = { timestamp: Date.now(), latitude, longitude, label };
+        setLocationLabel(label);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [userLocation]);
 
   // Separate useEffect for saved jobs that depends on user state
   useEffect(() => {
@@ -412,8 +491,8 @@ export default function App() {
             title="GenZ"
             onProfile={() => setProfileOpen(true)}
             user={user}
-            onBack={detailJob ? (() => setDetailJob(null)) : (activeTab !== 'Jobs' ? (() => setActiveTab('Jobs')) : null)}
-          />
+            locationLabel={locationLabel}
+            />
 
           {/* Connection Status Indicator */}
           {(isConnecting || connectionError) && (
@@ -451,7 +530,7 @@ export default function App() {
           )}
 
           <View style={{ flex: 1, padding: 12 }}>
-            {activeTab === 'Jobs' && <JobsScreen jobs={jobs} onOpenJob={openJob} onSaveJob={saveJob} savedIds={savedIds} userLocation={userLocation} />}
+            {activeTab === 'Jobs' && <JobsScreen jobs={jobs} onOpenJob={openJob} onSaveJob={saveJob} savedIds={savedIds} userLocation={userLocation} isConnecting={isConnecting} />}
             {activeTab === 'Saved' && <SavedScreen savedJobs={savedJobs} onOpen={openJob} onSave={saveJob} user={user} userLocation={userLocation} />}
             {activeTab === 'Post' && <PostScreen onPost={postJob} onOpenAuth={() => setAuthVisible(true)} user={user} />}
             {activeTab === 'Map' && (

@@ -7,15 +7,15 @@ import {
   collection, 
   query as fsQuery, 
   orderBy, 
-  onSnapshot, 
   limit, 
   startAfter,
-  getDocs
+  getDocs,
+  where,
+  Timestamp
 } from 'firebase/firestore';
 import JobItem from './JobItem';
-import RefreshingCard from './RefreshingCard';
 import { Colors, shared } from './Theme';
-import { ListSkeleton } from './SkeletonLoader';
+import { ListSkeleton, JobItemSkeleton } from './SkeletonLoader';
 import { useDebouncedSearch } from '../hooks';
 import { dataCache } from '../utils/dataCache';
 
@@ -45,13 +45,57 @@ const haversineKm = (lat1, lon1, lat2, lon2) => {
   return distance;
 };
 
-export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, savedIds, filters, userLocation }) {
+// Utility function to check if a post is within the last 30 days
+const isPostWithinLast30Days = (createdAt) => {
+  if (!createdAt) return false;
+  
+  try {
+    let postDate;
+    if (typeof createdAt === 'object' && createdAt.toDate) {
+      postDate = createdAt.toDate();
+    } else {
+      postDate = new Date(createdAt);
+    }
+    
+    if (isNaN(postDate.getTime())) return false;
+    
+    const now = new Date();
+    const thirtyDaysAgo = new Date(now.getTime() - (30 * 24 * 60 * 60 * 1000));
+    
+    return postDate >= thirtyDaysAgo;
+  } catch (error) {
+    console.warn('Error checking post date:', error);
+    return false;
+  }
+};
+
+const toFirestoreTimestamp = (value) => {
+  if (value == null) return null;
+  if (value.toMillis) return value;
+  if (typeof value === 'number') {
+    return Timestamp.fromMillis(value);
+  }
+  if (typeof value === 'object') {
+    const seconds = value.seconds ?? value._seconds;
+    const nanoseconds = value.nanoseconds ?? value._nanoseconds ?? 0;
+    if (typeof seconds === 'number') {
+      return new Timestamp(seconds, nanoseconds);
+    }
+    if (typeof value.toDate === 'function') {
+      return value;
+    }
+  }
+  return null;
+};
+
+export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, savedIds, filters, userLocation, isConnecting }) {
   const [query, setQuery] = useState('');
   const [partTimeOnly, setPartTimeOnly] = useState(filters?.partTimeOnly || false);
   const [filterKind, setFilterKind] = useState('all'); // 'all' | 'job' | 'accommodation'
-  const [sortBy, setSortBy] = useState(userLocation ? 'distance' : 'time'); // 'distance' | 'time' - default to distance if location available
-  const [jobs, setJobs] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [sortBy, setSortBy] = useState(() => (userLocation ? 'distance' : 'time'));
+  const [jobs, setJobs] = useState([]); // Internal state for jobs
+  const [loading, setLoading] = useState(propJobs === undefined || isConnecting); // Show loading if standalone mode or parent is connecting
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(propJobs !== undefined ? !isConnecting : false);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState({ jobs: true, accommodations: true });
@@ -62,59 +106,107 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
   const [selectedDays, setSelectedDays] = useState([]);
   const [accommodationType, setAccommodationType] = useState('all'); // 'all' | 'owned' | 'sharing'
   
+  // Use propJobs when provided by parent, fallback to internal jobs state for standalone mode
+  const activeJobs = useMemo(() => {
+    const jobsToUse = propJobs !== undefined ? propJobs : jobs;
+    
+    // Deduplicate by ID to prevent duplicate key errors
+    const uniqueJobs = jobsToUse.filter((job, index, self) => 
+      index === self.findIndex(j => j.id === job.id)
+    );
+    
+    return uniqueJobs;
+  }, [propJobs, jobs]);
+  
+  // Update loading state based on whether we have data
+  useEffect(() => {
+    if (propJobs !== undefined) {
+      if (isConnecting) {
+        setLoading(true);
+        setHasLoadedOnce(false);
+        return;
+      }
+
+      if (userLocation && sortBy !== 'distance') {
+        setSortBy('distance');
+      }
+      if (!userLocation && sortBy !== 'time') {
+        setSortBy('time');
+      }
+
+      if (propJobs.length > 0) {
+        setLoading(false);
+        setHasLoadedOnce(true);
+      } else {
+        // Parent finished loading but no data available
+        setLoading(false);
+        setHasLoadedOnce(true);
+      }
+    } else if (jobs.length > 0) {
+      // We have internal data, clear loading
+      setLoading(false);
+      setHasLoadedOnce(true);
+    }
+    // If in standalone mode and no data, keep loading true until data is fetched
+  }, [propJobs, jobs.length, isConnecting, userLocation, sortBy]);
+  
   const BATCH_SIZE = 10; // Smaller batch size for better initial load performance
   const DAYS_OF_WEEK = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
   
   // Use debounced search for better performance
   const debouncedQuery = useDebouncedSearch(query, 300);
   
-  // Handle sort toggle with debugging
+
+  
+  // Handle sort toggle
   const handleSortToggle = useCallback(() => {
     const newSortBy = sortBy === 'distance' ? 'time' : 'distance';
-    console.log(`Sort button clicked: ${sortBy} -> ${newSortBy}`);
     setSortBy(newSortBy);
   }, [sortBy]);
 
-  // Memoized job enrichment with distance calculations
+  // Memoized job enrichment with distance calculations - only when needed
   const enrichedJobs = useMemo(() => {
-    console.log(`Enriching jobs: ${jobs.length} jobs, userLocation:`, userLocation ? 'available' : 'not available');
-    
-    if (!userLocation) {
-      console.log('No user location, returning jobs without distance calculation');
-      // Still return jobs but with _distanceKm set to null for consistency
-      return jobs.map(j => ({ ...j, _distanceKm: null }));
+    // If not sorting by distance, skip expensive distance calculations
+    if (sortBy !== 'distance') {
+      return activeJobs.map(j => ({ ...j, _distanceKm: j._distanceKm || null }));
     }
     
-    const enriched = jobs.map(j => {
+    if (!userLocation) {
+      // Still return jobs but with _distanceKm set to null for consistency
+      return activeJobs.map(j => ({ ...j, _distanceKm: null }));
+    }
+    
+    const enriched = activeJobs.map(j => {
       if (j._distanceKm !== undefined) return j; // Already calculated
       
       let distance = null;
       if (j.lat && j.lng) {
         try { 
           distance = haversineKm(userLocation.latitude, userLocation.longitude, j.lat, j.lng); 
-          console.log(`Distance calculated for ${j.title}: ${distance.toFixed(2)} km`);
         } catch (e) { 
-          console.log(`Error calculating distance for ${j.title}:`, e);
           distance = null; 
         }
-      } else {
-        console.log(`No lat/lng for job: ${j.title}`);
       }
       return { ...j, _distanceKm: distance };
     });
     
-    console.log(`Enriched ${enriched.length} jobs, ${enriched.filter(j => j._distanceKm !== null).length} with valid distances`);
     return enriched;
-  }, [jobs, userLocation]);
+  }, [activeJobs, userLocation, sortBy]);
 
-  // Optimized search function with debouncing
+  // Optimized search function with debouncing and caching
   const searchJobs = useCallback((searchQuery, jobsList) => {
     if (!searchQuery.trim()) return jobsList;
     
-    const lowerQuery = searchQuery.toLowerCase();
+    const lowerQuery = searchQuery.toLowerCase().trim();
+    
+    // Use a simple filter with early returns for better performance
     return jobsList.filter(j => {
-      const searchText = `${j.title || ''} ${j.description || ''} ${j.location || ''}`.toLowerCase();
-      return searchText.includes(lowerQuery);
+      // Quick checks first (title is most commonly searched)
+      if (j.title && j.title.toLowerCase().includes(lowerQuery)) return true;
+      if (j.location && j.location.toLowerCase().includes(lowerQuery)) return true;
+      if (j.description && j.description.toLowerCase().includes(lowerQuery)) return true;
+      
+      return false;
     });
   }, []);
 
@@ -122,6 +214,11 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
   const filteredAndSortedJobs = useMemo(() => {
     // Apply search filter with debounced query
     let filtered = searchJobs(debouncedQuery, enrichedJobs);
+    
+    // Apply 30-day filter - only show posts from last 30 days
+    filtered = filtered.filter(job => {
+      return isPostWithinLast30Days(job.createdAt);
+    });
     
     // Apply type filter
     if (partTimeOnly) {
@@ -178,40 +275,34 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
 
     // Apply sorting
     const sorted = filtered.sort((a, b) => {
+      // Helper function to get date value consistently
+      const getDateValue = (item) => {
+        if (!item.createdAt) return 0;
+        try {
+          if (typeof item.createdAt === 'object' && item.createdAt.toDate) {
+            return item.createdAt.toDate().getTime();
+          }
+          if (typeof item.createdAt === 'string' || typeof item.createdAt === 'number') {
+            const date = new Date(item.createdAt);
+            return isNaN(date.getTime()) ? 0 : date.getTime();
+          }
+          return 0;
+        } catch (error) {
+          console.warn('Error parsing date for item:', item.title, error);
+          return 0;
+        }
+      };
+
       if (sortBy === 'distance') {
         // If no user location is available, fall back to time sorting
         if (!userLocation) {
-          try {
-            const getDateValue = (item) => {
-              if (!item.createdAt) return 0;
-              if (typeof item.createdAt === 'object' && item.createdAt.toDate) {
-                return item.createdAt.toDate().getTime();
-              }
-              const date = new Date(item.createdAt);
-              return isNaN(date.getTime()) ? 0 : date.getTime();
-            };
-            return getDateValue(b) - getDateValue(a); // Latest first when no location
-          } catch (error) {
-            return 0;
-          }
+          return getDateValue(b) - getDateValue(a); // Latest first when no location
         }
         
         // Sort by distance (nearest to farthest) - ascending order
         if (a._distanceKm == null && b._distanceKm == null) {
           // If both items don't have distance, sort by time (recent first) as secondary sort
-          try {
-            const getDateValue = (item) => {
-              if (!item.createdAt) return 0;
-              if (typeof item.createdAt === 'object' && item.createdAt.toDate) {
-                return item.createdAt.toDate().getTime();
-              }
-              const date = new Date(item.createdAt);
-              return isNaN(date.getTime()) ? 0 : date.getTime();
-            };
-            return getDateValue(b) - getDateValue(a); // Latest first for items without distance
-          } catch (error) {
-            return 0;
-          }
+          return getDateValue(b) - getDateValue(a); // Latest first for items without distance
         }
         if (a._distanceKm == null) return 1; // Items without distance go to end
         if (b._distanceKm == null) return -1; // Items with distance come first
@@ -220,73 +311,35 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
         return a._distanceKm - b._distanceKm;
       } else {
         // Sort by time (latest to oldest) - recent posts first
-        try {
-          const getDateValue = (item) => {
-            if (!item.createdAt) return 0;
-            if (typeof item.createdAt === 'object' && item.createdAt.toDate) {
-              return item.createdAt.toDate().getTime();
-            }
-            const date = new Date(item.createdAt);
-            return isNaN(date.getTime()) ? 0 : date.getTime();
-          };
-          
-          return getDateValue(b) - getDateValue(a); // Latest first (most recent)
-        } catch (error) {
-          console.warn('Error sorting by time:', error);
-          return 0;
-        }
+        const dateA = getDateValue(a);
+        const dateB = getDateValue(b);
+        
+        return dateB - dateA; // Latest first (most recent)
       }
     });
-
-    // Debug logging for sorting results
-    console.log(`Current sort by: ${sortBy}, filtered jobs count: ${filtered.length}`);
-    if (sortBy === 'distance' && sorted.length > 0) {
-      console.log('Distance sorting results (nearest first):');
-      sorted.slice(0, 5).forEach((item, index) => {
-        console.log(`${index + 1}. ${item.title} - ${item._distanceKm ? item._distanceKm.toFixed(2) + ' km' : 'No location data'}`);
-      });
-    } else if (sortBy === 'time' && sorted.length > 0) {
-      console.log('Time sorting results (most recent first):');
-      sorted.slice(0, 5).forEach((item, index) => {
-        let timeStr = 'No time';
-        if (item.createdAt) {
-          try {
-            let date;
-            if (typeof item.createdAt === 'object' && item.createdAt.toDate) {
-              date = item.createdAt.toDate();
-            } else {
-              date = new Date(item.createdAt);
-            }
-            if (!isNaN(date.getTime())) {
-              const now = new Date();
-              const diffInMinutes = Math.floor((now - date) / (1000 * 60));
-              if (diffInMinutes < 60) timeStr = `${diffInMinutes}m ago`;
-              else if (diffInMinutes < 1440) timeStr = `${Math.floor(diffInMinutes / 60)}h ago`;
-              else timeStr = `${Math.floor(diffInMinutes / 1440)}d ago`;
-            }
-          } catch (e) {
-            timeStr = 'Invalid time';
-          }
-        }
-        console.log(`${index + 1}. ${item.title} - ${timeStr}`);
-      });
-    }
 
     return sorted;
   }, [enrichedJobs, debouncedQuery, partTimeOnly, filterKind, sortBy, searchJobs, selectedDays, accommodationType, userLocation]);
 
   // Create display data with refreshing card when pulling to refresh
   const displayData = useMemo(() => {
-    // If refreshing and we have existing data, show refreshing card first
-    if (refreshing && filteredAndSortedJobs.length > 0) {
-      return [
-        { id: '__refreshing__', isRefreshingCard: true }, // Special marker for refreshing card
-        ...filteredAndSortedJobs
-      ];
-    }
+    let dataToDisplay = filteredAndSortedJobs;
     
+    // Final deduplication step to prevent duplicate keys in FlatList
+    dataToDisplay = dataToDisplay.filter((item, index, self) => 
+      index === self.findIndex(i => i.id === item.id)
+    );
+    
+    if (refreshing) {
+      const skeletonPlaceholder = { id: '__refreshing_skeleton__', isSkeleton: true };
+      if (dataToDisplay.length > 0) {
+        return [skeletonPlaceholder, ...dataToDisplay];
+      }
+      return [skeletonPlaceholder];
+    }
+
     // Otherwise just show the normal filtered data
-    return filteredAndSortedJobs;
+    return dataToDisplay;
   }, [refreshing, filteredAndSortedJobs]);
 
   // Remove the old debounced query effect since we're using the hook
@@ -298,71 +351,28 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
   //   return () => clearTimeout(timeoutId);
   // }, [query]);
 
-  // Load data from cache first, then network if needed
-  const loadInitialData = useCallback(async (forceRefresh = false) => {
-    try {
-      if (!forceRefresh) {
-        // Try to load from cache first
-        const [cachedJobs, cachedAccommodations] = await Promise.all([
-          dataCache.getCachedJobs(),
-          dataCache.getCachedAccommodations()
-        ]);
-
-        if (cachedJobs && cachedAccommodations) {
-          // Use cached data - deduplicate by ID
-          const allJobs = [...cachedJobs.data, ...cachedAccommodations.data];
-          const uniqueJobs = allJobs.filter((job, index, self) => 
-            index === self.findIndex(j => j.id === job.id)
-          );
-
-          // Debug logging for cached data to check createdAt field
-          console.log('Cached data load - checking createdAt fields:');
-          uniqueJobs.slice(0, 3).forEach((job, index) => {
-            console.log(`Cached Job ${index + 1}: ${job.title}`);
-            console.log(`  - createdAt:`, job.createdAt);
-            console.log(`  - createdAt type:`, typeof job.createdAt);
-            console.log(`  - createdAt has toDate:`, job.createdAt && typeof job.createdAt.toDate === 'function');
-          });
-
-          setJobs(uniqueJobs);
-          setLoading(false);
-          
-          console.log('Loaded data from cache:', {
-            jobs: cachedJobs.data.length,
-            accommodations: cachedAccommodations.data.length,
-            totalUnique: uniqueJobs.length,
-            remainingTime: dataCache.formatRemainingTime(Math.min(cachedJobs.remainingTime, cachedAccommodations.remainingTime))
-          });
-          
-          return; // Don't load from network
-        }
-      }
-
-      // Load from network
-      await loadFromNetwork();
-      
-    } catch (error) {
-      console.warn('Error loading initial data:', error);
-      setLoading(false);
-    }
-  }, []);
-
   // Load data from Firestore and cache it
-  const loadFromNetwork = useCallback(async () => {
-    setLoading(true);
+  const loadFromNetwork = useCallback(async ({ silent = false } = {}) => {
+    // Only set loading to true if not already refreshing or when not in silent mode
+    if (!silent && !refreshing) {
+      setLoading(true);
+    }
     
     try {
-      // Load jobs
+      // Calculate 30 days ago timestamp for Firestore query
+      const thirtyDaysAgo = Timestamp.fromDate(new Date(Date.now() - (30 * 24 * 60 * 60 * 1000)));
+      
+      // Load jobs from last 30 days only
       const jobsQuery = fsQuery(
         collection(db, 'jobs'), 
         orderBy('createdAt', 'desc'),
+        where('createdAt', '>=', thirtyDaysAgo),
         limit(BATCH_SIZE)
       );
       
       const jobsSnapshot = await getDocs(jobsQuery);
       const jobsData = jobsSnapshot.docs.map(d => {
         const data = d.data();
-        console.log(`Job loaded: ${data.title}, lat: ${data.lat}, lng: ${data.lng}, createdAt: ${data.createdAt}`);
         return { 
           id: d.id, 
           kind: 'job',
@@ -370,17 +380,17 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
         };
       });
       
-      // Load accommodations
+      // Load accommodations from last 30 days only
       const accommodationsQuery = fsQuery(
         collection(db, 'accommodations'), 
         orderBy('createdAt', 'desc'),
+        where('createdAt', '>=', thirtyDaysAgo),
         limit(BATCH_SIZE)
       );
       
       const accommodationsSnapshot = await getDocs(accommodationsQuery);
       const accommodationsData = accommodationsSnapshot.docs.map(d => {
         const data = d.data();
-        console.log(`Accommodation loaded: ${data.title}, lat: ${data.lat}, lng: ${data.lng}, createdAt: ${data.createdAt}`);
         return { 
           id: d.id, 
           kind: 'accommodation',
@@ -394,21 +404,16 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
         index === self.findIndex(j => j.id === job.id)
       );
 
-      // Debug logging for initial load to check createdAt field
-      console.log('Initial network load - checking createdAt fields:');
-      uniqueJobs.slice(0, 3).forEach((job, index) => {
-        console.log(`Job ${index + 1}: ${job.title}`);
-        console.log(`  - createdAt:`, job.createdAt);
-        console.log(`  - createdAt type:`, typeof job.createdAt);
-        console.log(`  - createdAt has toDate:`, job.createdAt && typeof job.createdAt.toDate === 'function');
-      });
-
+      // Set the jobs data
       setJobs(uniqueJobs);
 
       // Update pagination state
+      const lastJobDoc = jobsSnapshot.docs[jobsSnapshot.docs.length - 1];
+      const lastAccommodationDoc = accommodationsSnapshot.docs[accommodationsSnapshot.docs.length - 1];
+
       const newLastVisible = {
-        jobs: jobsSnapshot.docs[jobsSnapshot.docs.length - 1] || null,
-        accommodations: accommodationsSnapshot.docs[accommodationsSnapshot.docs.length - 1] || null
+        jobs: lastJobDoc ? toFirestoreTimestamp(lastJobDoc.data()?.createdAt) : null,
+        accommodations: lastAccommodationDoc ? toFirestoreTimestamp(lastAccommodationDoc.data()?.createdAt) : null
       };
       setLastVisible(newLastVisible);
       
@@ -419,25 +424,83 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
       setHasMore(newHasMore);
 
       // Cache the data
+      const jobsOnly = uniqueJobs.filter(item => item.kind === 'job');
+      const accommodationsOnly = uniqueJobs.filter(item => item.kind === 'accommodation');
       await Promise.all([
-        dataCache.saveJobs(jobsData),
-        dataCache.saveAccommodations(accommodationsData),
+        dataCache.saveJobs(jobsOnly),
+        dataCache.saveAccommodations(accommodationsOnly),
         dataCache.savePaginationState(newHasMore, newLastVisible)
       ]);
 
-      console.log('Loaded data from network and cached:', {
-        jobs: jobsData.length,
-        accommodations: accommodationsData.length,
-        totalUnique: uniqueJobs.length
-      });
       
     } catch (error) {
-      console.warn('Error loading from network:', error);
+      console.error('Error loading from network:', error);
     } finally {
+      // Always clear loading states
+      if (!silent) {
+        setLoading(false);
+      }
+      setRefreshing(false);
+      setHasLoadedOnce(true);
+    }
+  }, [refreshing]); // Removed jobs.length dependency to avoid issues
+
+  // Load data from cache first, then network if needed
+  const loadInitialData = useCallback(async (forceRefresh = false) => {
+    if (!forceRefresh) {
+      setLoading(true);
+    }
+
+    try {
+      let cacheUsed = false;
+
+      if (!forceRefresh) {
+        const [cachedJobs, cachedAccommodations, cachedPagination] = await Promise.all([
+          dataCache.getCachedJobs(),
+          dataCache.getCachedAccommodations(),
+          dataCache.getCachedPaginationState()
+        ]);
+
+        const cachedItems = [
+          ...(cachedJobs?.data || []),
+          ...(cachedAccommodations?.data || [])
+        ];
+
+        if (cachedItems.length > 0) {
+          const uniqueCachedItems = cachedItems.filter((job, index, self) =>
+            index === self.findIndex(j => j.id === job.id)
+          );
+
+          const recentJobs = uniqueCachedItems.filter(job => isPostWithinLast30Days(job.createdAt));
+
+          setJobs(recentJobs);
+          setHasLoadedOnce(true);
+
+          if (cachedPagination) {
+            setHasMore(cachedPagination.hasMore || { jobs: true, accommodations: true });
+            setLastVisible({
+              jobs: toFirestoreTimestamp(cachedPagination.lastVisible?.jobs),
+              accommodations: toFirestoreTimestamp(cachedPagination.lastVisible?.accommodations)
+            });
+          } else {
+            setHasMore({ jobs: true, accommodations: true });
+            setLastVisible({ jobs: null, accommodations: null });
+          }
+
+          setLoading(false);
+          cacheUsed = true;
+        }
+      }
+
+      await loadFromNetwork({ silent: cacheUsed && !forceRefresh });
+
+    } catch (error) {
+      console.error('Error loading initial data:', error);
       setLoading(false);
       setRefreshing(false);
+      setHasLoadedOnce(true);
     }
-  }, []);
+  }, [loadFromNetwork]);
 
   // Auto-refresh timer - check every minute if data needs refresh
   useEffect(() => {
@@ -460,22 +523,46 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
     return () => clearInterval(interval);
   }, [loadInitialData]);
 
-  // Initial data load - try cache first, then network
+  // Initial data load - only if propJobs is not available
   useEffect(() => {
-    loadInitialData();
-  }, [loadInitialData]);
+    // If we have propJobs (from parent component), use them and don't fetch independently
+    if (propJobs !== undefined) {
+      // Parent handles loading state through isConnecting effect above
+      setHasLoadedOnce(propJobs.length > 0);
+      return;
+    }
+    
+    // Only fetch data if no propJobs are provided (standalone mode)
+    if (propJobs === undefined && jobs.length === 0) {
+      loadInitialData().catch((error) => {
+        console.error('Initial load failed:', error);
+      });
+    } else if (propJobs === undefined) {
+      // We already have internal data, just clear loading
+      setLoading(false);
+    }
+  }, [propJobs, jobs.length, loadInitialData]);
 
   // Pull to refresh handler
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
-    await loadInitialData(true); // Force refresh from network
-  }, [loadInitialData]);
+    
+    // If propJobs are provided (parent manages data), refresh is handled by parent
+    if (propJobs !== undefined) {
+      // Just clear the refreshing state after a short delay
+      setTimeout(() => {
+        setRefreshing(false);
+      }, 1000);
+    } else {
+      // We're in standalone mode, refresh from network
+      await loadInitialData(true); // Force refresh from network
+    }
+  }, [loadInitialData, propJobs]);
 
   // Load more jobs when scrolling - with proper pagination
   const loadMoreJobs = useCallback(async () => {
     if (loadingMore || refreshing) return;
     
-    // Check if we can load more of either type
     const canLoadMoreJobs = hasMore.jobs && lastVisible.jobs;
     const canLoadMoreAccommodations = hasMore.accommodations && lastVisible.accommodations;
     
@@ -486,69 +573,94 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
     try {
       const newJobs = [];
       const newAccommodations = [];
+      let jobsSnapshot = null;
+      let accommodationsSnapshot = null;
       
-      // Load more jobs if available
+      const thirtyDaysAgo = Timestamp.fromDate(new Date(Date.now() - (30 * 24 * 60 * 60 * 1000)));
+      
       if (canLoadMoreJobs) {
         const nextJobsQuery = fsQuery(
           collection(db, 'jobs'),
           orderBy('createdAt', 'desc'),
+          where('createdAt', '>=', thirtyDaysAgo),
           startAfter(lastVisible.jobs),
           limit(BATCH_SIZE)
         );
         
-        const jobsSnapshot = await getDocs(nextJobsQuery);
-        const moreJobs = jobsSnapshot.docs.map(d => ({ 
-          id: d.id, 
+        jobsSnapshot = await getDocs(nextJobsQuery);
+        const moreJobs = jobsSnapshot.docs.map(d => ({
+          id: d.id,
           kind: 'job',
-          ...d.data() 
+          ...d.data()
         }));
-        
         newJobs.push(...moreJobs);
-        
-        // Update pagination state for jobs
-        if (jobsSnapshot.docs.length > 0) {
-          const lastJobDoc = jobsSnapshot.docs[jobsSnapshot.docs.length - 1];
-          setLastVisible(prev => ({ ...prev, jobs: lastJobDoc }));
-        }
-        setHasMore(prev => ({ ...prev, jobs: jobsSnapshot.docs.length === BATCH_SIZE }));
       }
       
-      // Load more accommodations if available
       if (canLoadMoreAccommodations) {
         const nextAccommodationsQuery = fsQuery(
           collection(db, 'accommodations'),
           orderBy('createdAt', 'desc'),
+          where('createdAt', '>=', thirtyDaysAgo),
           startAfter(lastVisible.accommodations),
           limit(BATCH_SIZE)
         );
         
-        const accommodationsSnapshot = await getDocs(nextAccommodationsQuery);
-        const moreAccommodations = accommodationsSnapshot.docs.map(d => ({ 
-          id: d.id, 
+        accommodationsSnapshot = await getDocs(nextAccommodationsQuery);
+        const moreAccommodations = accommodationsSnapshot.docs.map(d => ({
+          id: d.id,
           kind: 'accommodation',
-          ...d.data() 
+          ...d.data()
         }));
-        
         newAccommodations.push(...moreAccommodations);
-        
-        // Update pagination state for accommodations
-        if (accommodationsSnapshot.docs.length > 0) {
-          const lastAccDoc = accommodationsSnapshot.docs[accommodationsSnapshot.docs.length - 1];
-          setLastVisible(prev => ({ ...prev, accommodations: lastAccDoc }));
-        }
-        setHasMore(prev => ({ ...prev, accommodations: accommodationsSnapshot.docs.length === BATCH_SIZE }));
       }
       
-      // Add new items to existing jobs - deduplicate by ID
-      if (newJobs.length > 0 || newAccommodations.length > 0) {
-        setJobs(prevJobs => {
-          const allJobs = [...prevJobs, ...newJobs, ...newAccommodations];
-          // Remove duplicates based on ID
-          const uniqueJobs = allJobs.filter((job, index, self) => 
-            index === self.findIndex(j => j.id === job.id)
-          );
-          return uniqueJobs;
-        });
+      const hasNewData = newJobs.length > 0 || newAccommodations.length > 0;
+      const jobsDocsLength = jobsSnapshot ? jobsSnapshot.docs.length : 0;
+      const accommodationsDocsLength = accommodationsSnapshot ? accommodationsSnapshot.docs.length : 0;
+
+      if (hasNewData) {
+        const updatedJobsList = (() => {
+          const allJobs = [...jobs, ...newJobs, ...newAccommodations];
+          return allJobs.filter((job, index, self) => index === self.findIndex(j => j.id === job.id));
+        })();
+
+        setJobs(updatedJobsList);
+
+        const updatedLastVisible = {
+          jobs: jobsSnapshot && jobsDocsLength > 0
+            ? toFirestoreTimestamp(jobsSnapshot.docs[jobsDocsLength - 1].data()?.createdAt)
+            : lastVisible.jobs,
+          accommodations: accommodationsSnapshot && accommodationsDocsLength > 0
+            ? toFirestoreTimestamp(accommodationsSnapshot.docs[accommodationsDocsLength - 1].data()?.createdAt)
+            : lastVisible.accommodations
+        };
+        setLastVisible(updatedLastVisible);
+
+        const updatedHasMore = {
+          jobs: canLoadMoreJobs ? jobsDocsLength === BATCH_SIZE : hasMore.jobs,
+          accommodations: canLoadMoreAccommodations ? accommodationsDocsLength === BATCH_SIZE : hasMore.accommodations
+        };
+        setHasMore(updatedHasMore);
+
+        await Promise.all([
+          dataCache.saveJobs(updatedJobsList.filter(item => item.kind === 'job')),
+          dataCache.saveAccommodations(updatedJobsList.filter(item => item.kind === 'accommodation')),
+          dataCache.savePaginationState(updatedHasMore, updatedLastVisible)
+        ]);
+      } else {
+        const fallbackHasMore = {
+          jobs: canLoadMoreJobs && jobsSnapshot ? jobsDocsLength === BATCH_SIZE : hasMore.jobs,
+          accommodations: canLoadMoreAccommodations && accommodationsSnapshot ? accommodationsDocsLength === BATCH_SIZE : hasMore.accommodations
+        };
+
+        if (canLoadMoreJobs && jobsSnapshot) {
+          setHasMore(prev => ({ ...prev, jobs: fallbackHasMore.jobs }));
+        }
+        if (canLoadMoreAccommodations && accommodationsSnapshot) {
+          setHasMore(prev => ({ ...prev, accommodations: fallbackHasMore.accommodations }));
+        }
+
+        await dataCache.savePaginationState(fallbackHasMore, lastVisible);
       }
       
     } catch (error) {
@@ -556,15 +668,15 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
     } finally {
       setLoadingMore(false);
     }
-  }, [loadingMore, refreshing, hasMore, lastVisible]);
+  }, [loadingMore, refreshing, hasMore, lastVisible, jobs]);
 
   // Memoized render item to prevent unnecessary re-renders
   const renderJobItem = useCallback(({ item }) => {
-    // Render refreshing card for the special marker
-    if (item.isRefreshingCard) {
+    // Render skeleton placeholder while refreshing
+    if (item.isSkeleton) {
       return (
         <View style={{ paddingHorizontal: 12 }}>
-          <RefreshingCard />
+          <JobItemSkeleton />
         </View>
       );
     }
@@ -584,12 +696,12 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
   }, [onOpenJob, onSaveJob, savedIds, userLocation]);
 
   const keyExtractor = useCallback((item) => {
-    // Handle refreshing card
-    if (item.isRefreshingCard) {
-      return '__refreshing__';
+    // Handle skeleton placeholder
+    if (item.isSkeleton) {
+      return '__refreshing_skeleton__';
     }
     // Handle normal job items
-    return item.id;
+    return item.id ? String(item.id) : '__unknown_item__';
   }, []);
 
   return (
@@ -701,15 +813,18 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
         </View>
       )}
 
-      {/* Performance indicator */}
+
+      {/* Show skeleton loading when connecting or initially loading */}
       {loading ? (
-        <ListSkeleton count={6} />
+        <View style={{ paddingHorizontal: 12, paddingVertical: 12 }}>
+          <ListSkeleton count={6} />
+        </View>
       ) : (
         <FlatList
           data={displayData}
           keyExtractor={keyExtractor}
           renderItem={renderJobItem}
-          contentContainerStyle={{ paddingVertical: 12 }}
+          contentContainerStyle={{ paddingTop: refreshing ? 20 : 12, paddingBottom: 12 }}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -720,21 +835,19 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
               titleColor={Colors.muted}
             />
           }
-          ListEmptyComponent={
+          ListEmptyComponent={!loading && hasLoadedOnce ? (
             <View style={{ alignItems: 'center', marginTop: 40 }}>
               <Text style={{ textAlign: 'center', color: Colors.muted, marginBottom: 8 }}>
                 No jobs found
               </Text>
-              {!loading && (
-                <TouchableOpacity 
-                  onPress={() => handleRefresh()}
-                  style={[shared.smallButton, { backgroundColor: Colors.primary, borderColor: Colors.primary }]}
-                >
-                  <Text style={{ color: Colors.card }}>Refresh</Text>
-                </TouchableOpacity>
-              )}
+              <TouchableOpacity 
+                onPress={() => handleRefresh()}
+                style={[shared.smallButton, { backgroundColor: Colors.primary, borderColor: Colors.primary }]}
+              >
+                <Text style={{ color: Colors.card }}>Refresh</Text>
+              </TouchableOpacity>
             </View>
-          }
+          ) : null}
           // Performance optimizations
           removeClippedSubviews={true}
           maxToRenderPerBatch={10}
