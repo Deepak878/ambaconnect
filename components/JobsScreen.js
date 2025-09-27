@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { View, TextInput, TouchableOpacity, Text, FlatList, RefreshControl, Modal, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -101,6 +101,7 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
   const [hasMore, setHasMore] = useState({ jobs: true, accommodations: true });
   const [lastVisible, setLastVisible] = useState({ jobs: null, accommodations: null });
   const [showFilterModal, setShowFilterModal] = useState(false);
+  const hasManuallySelectedSort = useRef(false);
   
   // Advanced filter states
   const [selectedDays, setSelectedDays] = useState([]);
@@ -127,13 +128,6 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
         return;
       }
 
-      if (userLocation && sortBy !== 'distance') {
-        setSortBy('distance');
-      }
-      if (!userLocation && sortBy !== 'time') {
-        setSortBy('time');
-      }
-
       if (propJobs.length > 0) {
         setLoading(false);
         setHasLoadedOnce(true);
@@ -148,7 +142,7 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
       setHasLoadedOnce(true);
     }
     // If in standalone mode and no data, keep loading true until data is fetched
-  }, [propJobs, jobs.length, isConnecting, userLocation, sortBy]);
+  }, [propJobs, jobs.length, isConnecting]);
   
   const BATCH_SIZE = 10; // Smaller batch size for better initial load performance
   const DAYS_OF_WEEK = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -160,9 +154,26 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
   
   // Handle sort toggle
   const handleSortToggle = useCallback(() => {
-    const newSortBy = sortBy === 'distance' ? 'time' : 'distance';
-    setSortBy(newSortBy);
-  }, [sortBy]);
+    if (!userLocation) {
+      setSortBy('time');
+      hasManuallySelectedSort.current = false;
+      return;
+    }
+
+    hasManuallySelectedSort.current = true;
+    setSortBy(prev => (prev === 'distance' ? 'time' : 'distance'));
+  }, [userLocation]);
+
+  useEffect(() => {
+    if (userLocation) {
+      if (!hasManuallySelectedSort.current) {
+        setSortBy(prev => (prev === 'distance' ? prev : 'distance'));
+      }
+    } else {
+      setSortBy('time');
+      hasManuallySelectedSort.current = false;
+    }
+  }, [userLocation]);
 
   // Memoized job enrichment with distance calculations - only when needed
   const enrichedJobs = useMemo(() => {
@@ -783,9 +794,10 @@ export default function JobsScreen({ jobs: propJobs, onOpenJob, onSaveJob, saved
               alignItems: 'center',
               paddingHorizontal: 12,
               minWidth: 80,
-              opacity: (sortBy === 'distance' && !userLocation) ? 0.6 : 1,
+              opacity: !userLocation ? 0.6 : 1,
             }
           ]}
+          disabled={!userLocation}
         >
           <Ionicons 
             name={sortBy === 'distance' ? 'location-outline' : 'time-outline'} 
