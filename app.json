@@ -6,37 +6,32 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-  "newArchEnabled": false,
-
+    "newArchEnabled": false,
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
-
     "ios": {
       "supportsTablet": true
     },
-
     "android": {
-      "package": "com.deepak.genz",               
-      "versionCode": 1,                            
-      "permissions": [],                           
+      "package": "com.deepak.genz",
+      "versionCode": 1,
+      "permissions": [],
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "minimumSdkVersion": 24                      
+      "minimumSdkVersion": 24
     },
-
     "web": {
       "favicon": "./assets/favicon.png"
     },
-
     "plugins": [
       [
-        "expo-build-properties",                   
+        "expo-build-properties",
         {
           "android": {
             "compileSdkVersion": 35,
@@ -48,7 +43,13 @@
         }
       ],
       "expo-asset",
-      ["expo-updates", { "enabled": false }]       
+      [
+        "expo-updates",
+        {
+          "enabled": false
+        }
+      ],
+      "expo-secure-store"
     ],
     "extra": {
       "eas": {
