@@ -6,9 +6,9 @@ import { getStorage } from 'firebase/storage';
 
 const firebaseConfig = {
   apiKey: "AIzaSyBAvfLB97sfLDSLHux4ueUx0Gw2flQROmQ",
-  authDomain: "ambaconnect-ff4cd.firebaseapp.com",
-  projectId: "ambaconnect-ff4cd",
-  storageBucket: "ambaconnect-ff4cd.firebasestorage.app",
+  authDomain: "GenZ-ff4cd.firebaseapp.com",
+  projectId: "GenZ-ff4cd",
+  storageBucket: "GenZ-ff4cd.firebasestorage.app",
   messagingSenderId: "61933449945",
   appId: "1:61933449945:web:4475da6b84a78d321e04c8",
   measurementId: "G-N95EJ7R3NT"

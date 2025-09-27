@@ -1,4 +1,4 @@
-// Firebase Storage Security Rules for AmbaConnect
+// Firebase Storage Security Rules for GenZ
 // Copy and paste this into Firebase Console > Storage > Rules
 
 rules_version = '2';

@@ -1,4 +1,4 @@
-# AmbaConnect - Latest UI/UX Improvements
+# GenZ - Latest UI/UX Improvements
 
 ## Changes Made
 

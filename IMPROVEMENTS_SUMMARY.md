@@ -1,4 +1,4 @@
-# AmbaConnect - Recent Improvements Summary
+# GenZ - Recent Improvements Summary
 
 ## Issues Fixed
 

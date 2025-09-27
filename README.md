@@ -1,4 +1,4 @@
-# AmbaConnect - Job & Housing Marketplace
+# GenZ - Job & Housing Marketplace
 
 A modern React Native app for job and accommodation listings with real-time updates, advanced filtering, and location-based search.
 
@@ -56,8 +56,8 @@ A modern React Native app for job and accommodation listings with real-time upda
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/Deepak878/ambaconnect.git
-   cd ambaconnect
+   git clone https://github.com/Deepak878/GenZ.git
+   cd GenZ
    ```
 
 2. **Install dependencies**
@@ -88,7 +88,7 @@ A modern React Native app for job and accommodation listings with real-time upda
 ## Project Structure 📂
 
 ```
-ambaconnect/
+GenZ/
 ├── components/           # React components
 │   ├── AuthScreen.js    # Login/Register
 │   ├── JobsScreen.js    # Job listings with filters
@@ -181,4 +181,4 @@ For support and questions, please open an issue on GitHub or contact the develop
 
 ---
 
-**Built with ❤️ by the AmbaConnect Team**
+**Built with ❤️ by the GenZ Team**
