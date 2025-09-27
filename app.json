@@ -1,31 +1,55 @@
 {
   "expo": {
     "name": "GenZ",
-    "slug": "GenZ",
+    "slug": "genz",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
+
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
+
     "ios": {
       "supportsTablet": true
     },
+
     "android": {
+      "package": "com.deepak.genz",               
+      "versionCode": 1,                            
+      "permissions": [],                           
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.deepak.genz"
+      "minimumSdkVersion": 24                      
     },
+
     "web": {
       "favicon": "./assets/favicon.png"
     },
+
+    "plugins": [
+      [
+        "expo-build-properties",                   
+        {
+          "android": {
+            "compileSdkVersion": 35,
+            "targetSdkVersion": 35,
+            "minSdkVersion": 24,
+            "kotlinVersion": "1.9.24",
+            "javaVersion": "17"
+          }
+        }
+      ],
+      "expo-asset",
+      ["expo-updates", { "enabled": false }]       
+    ],
     "extra": {
       "eas": {
         "projectId": "d32f5009-ab72-4ca2-8128-f6583d34316b"
